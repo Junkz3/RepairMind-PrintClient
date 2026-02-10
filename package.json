@@ -1,0 +1,95 @@
+{
+  "name": "repairmind-print-client",
+  "version": "1.0.0",
+  "description": "RepairMind Print Client - Desktop app for printer management",
+  "main": "src/electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win --x64",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder -mwl",
+    "postinstall": "electron-builder install-app-deps",
+    "legacy:start": "node src/core/index.js"
+  },
+  "build": {
+    "appId": "com.repairmind.printclient",
+    "productName": "RepairMind Print Client",
+    "copyright": "Copyright © 2026 RepairMind",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "!src/**/*.map",
+      "!**/*.ts",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"],
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Utility",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "repairmind",
+      "repo": "print-client"
+    }
+  },
+  "keywords": [
+    "print",
+    "printer",
+    "escpos",
+    "thermal",
+    "repairmind",
+    "electron"
+  ],
+  "author": "RepairMind",
+  "license": "MIT",
+  "dependencies": {
+    "@thiagoelg/node-printer": "^0.6.2",
+    "node-thermal-printer": "^4.4.5",
+    "pdfkit": "^0.15.0",
+    "socket.io-client": "^4.8.1",
+    "dotenv": "^16.6.1",
+    "auto-launch": "^5.0.6",
+    "electron-log": "^5.0.0",
+    "electron-updater": "^6.1.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

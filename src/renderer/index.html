@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+    <title>RepairMind Print Client</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🖨️ RepairMind Print Client</h1>
+            <div class="status" id="status">
+                <span class="status-dot offline"></span>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Configuration Section -->
+            <section class="card">
+                <h2>Configuration</h2>
+                <form id="config-form">
+                    <div class="form-group">
+                        <label for="backend-url">Backend URL</label>
+                        <input type="text" id="backend-url" placeholder="http://localhost:5001" />
+                    </div>
+                    <div class="form-group">
+                        <label for="websocket-url">WebSocket URL</label>
+                        <input type="text" id="websocket-url" placeholder="ws://localhost:5001" />
+                    </div>
+                    <div class="form-group">
+                        <label for="tenant-id">Tenant ID</label>
+                        <input type="text" id="tenant-id" placeholder="repairmind_tenant_0" />
+                    </div>
+                    <div class="form-group">
+                        <label for="client-id">Client ID</label>
+                        <input type="text" id="client-id" placeholder="workstation-01" />
+                    </div>
+                    <div class="form-group">
+                        <label for="api-key">API Key</label>
+                        <input type="password" id="api-key" placeholder="Your API key" />
+                    </div>
+                    <button type="submit" class="btn-primary">Save & Restart</button>
+                </form>
+            </section>
+
+            <!-- Printers Section -->
+            <section class="card">
+                <h2>Printers (<span id="printer-count">0</span>)</h2>
+                <div id="printers-list" class="printers-list">
+                    <p class="empty-state">No printers detected</p>
+                </div>
+                <button class="btn-secondary" id="refresh-printers">Refresh Printers</button>
+            </section>
+
+            <!-- Recent Jobs Section -->
+            <section class="card">
+                <h2>Recent Print Jobs</h2>
+                <div id="jobs-list" class="jobs-list">
+                    <p class="empty-state">No recent jobs</p>
+                </div>
+            </section>
+
+            <!-- Updates Section -->
+            <section class="card" id="update-section" style="display: none;">
+                <h2>🔄 Update Available</h2>
+                <p id="update-message">A new version is available</p>
+                <button class="btn-primary" id="download-update">Download Update</button>
+                <button class="btn-primary" id="install-update" style="display: none;">Install & Restart</button>
+            </section>
+        </main>
+
+        <footer>
+            <p>Version <span id="version">1.0.0</span></p>
+            <p class="hint">The app runs in the system tray when closed</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
