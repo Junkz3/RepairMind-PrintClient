@@ -8,19 +8,70 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- Toast notifications container -->
+    <div id="toast-container"></div>
+
+    <!-- Custom title bar -->
+    <div class="titlebar">
+        <div class="titlebar-drag">
+            <div class="titlebar-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                    <rect x="6" y="14" width="12" height="8"></rect>
+                </svg>
+                <span>RepairMind Print Client</span>
+            </div>
+        </div>
+        <div class="titlebar-controls">
+            <button class="titlebar-btn" id="btn-minimize" title="Minimize">
+                <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1.5" fill="currentColor"/></svg>
+            </button>
+            <button class="titlebar-btn" id="btn-maximize" title="Maximize">
+                <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            </button>
+            <button class="titlebar-btn titlebar-btn-close" id="btn-close" title="Close">
+                <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+        </div>
+    </div>
+
     <div class="container">
+        <!-- Header with status -->
         <header>
-            <h1>🖨️ RepairMind Print Client</h1>
-            <div class="status" id="status">
-                <span class="status-dot offline"></span>
-                <span id="status-text">Disconnected</span>
+            <div class="header-content">
+                <div class="header-info">
+                    <h1>Print Client</h1>
+                    <p class="header-subtitle">Gestionnaire d'impression RepairMind</p>
+                </div>
+                <div class="header-right">
+                    <div class="status" id="status">
+                        <span class="status-dot offline"></span>
+                        <span id="status-text">Disconnected</span>
+                    </div>
+                    <button class="btn-icon btn-settings" id="btn-settings" title="Settings">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </header>
 
-        <main>
-            <!-- Configuration Section -->
-            <section class="card">
-                <h2>Configuration</h2>
+        <!-- Settings Panel (slide-over) -->
+        <div class="settings-overlay" id="settings-overlay"></div>
+        <div class="settings-panel" id="settings-panel">
+            <div class="settings-header">
+                <h2>Settings</h2>
+                <button class="btn-icon" id="btn-close-settings" title="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="settings-body">
                 <form id="config-form">
                     <div class="form-group">
                         <label for="backend-url">Backend URL</label>
@@ -42,39 +93,90 @@
                         <label for="api-key">API Key</label>
                         <input type="password" id="api-key" placeholder="Your API key" />
                     </div>
-                    <button type="submit" class="btn-primary">Save & Restart</button>
+                    <button type="submit" class="btn-primary btn-full">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                            <polyline points="7 3 7 8 15 8"></polyline>
+                        </svg>
+                        Save & Restart
+                    </button>
                 </form>
-            </section>
+            </div>
+        </div>
 
+        <main>
             <!-- Printers Section -->
             <section class="card">
-                <h2>Printers (<span id="printer-count">0</span>)</h2>
-                <div id="printers-list" class="printers-list">
-                    <p class="empty-state">No printers detected</p>
+                <div class="card-header">
+                    <svg class="card-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                        <rect x="6" y="14" width="12" height="8"></rect>
+                    </svg>
+                    <h2>Printers <span class="badge" id="printer-count">0</span></h2>
+                    <button class="btn-icon" id="refresh-printers" title="Refresh">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    </button>
                 </div>
-                <button class="btn-secondary" id="refresh-printers">Refresh Printers</button>
+                <div id="printers-list" class="printers-list">
+                    <div class="empty-state">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+                            <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                            <rect x="6" y="14" width="12" height="8"></rect>
+                        </svg>
+                        <p>No printers detected</p>
+                    </div>
+                </div>
             </section>
 
             <!-- Recent Jobs Section -->
             <section class="card">
-                <h2>Recent Print Jobs</h2>
+                <div class="card-header">
+                    <svg class="card-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                    </svg>
+                    <h2>Recent Jobs</h2>
+                </div>
                 <div id="jobs-list" class="jobs-list">
-                    <p class="empty-state">No recent jobs</p>
+                    <div class="empty-state">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        <p>No recent jobs</p>
+                    </div>
                 </div>
             </section>
 
             <!-- Updates Section -->
-            <section class="card" id="update-section" style="display: none;">
-                <h2>🔄 Update Available</h2>
-                <p id="update-message">A new version is available</p>
+            <section class="card card-update" id="update-section" style="display: none;">
+                <div class="card-header">
+                    <svg class="card-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <h2>Update Available</h2>
+                </div>
+                <p id="update-message" class="update-msg">A new version is available</p>
                 <button class="btn-primary" id="download-update">Download Update</button>
                 <button class="btn-primary" id="install-update" style="display: none;">Install & Restart</button>
             </section>
         </main>
 
         <footer>
-            <p>Version <span id="version">1.0.0</span></p>
-            <p class="hint">The app runs in the system tray when closed</p>
+            <span>v<span id="version">1.0.0</span></span>
+            <span class="separator">|</span>
+            <span class="hint">Minimizes to system tray when closed</span>
         </footer>
     </div>
 

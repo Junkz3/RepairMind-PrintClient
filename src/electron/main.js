@@ -12,25 +12,24 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } = require('electr
 const path = require('path');
 const AutoLaunch = require('auto-launch');
 const log = require('electron-log');
-const { autoUpdater } = require('electron-updater');
 
 // Configure logging
 log.transports.file.level = 'info';
-autoUpdater.logger = log;
+
+// electron-updater is lazy-loaded in setupAutoUpdater() to avoid
+// accessing app.getVersion() before the app is ready.
+let autoUpdater = null;
 
 // Print Client Core
-const PrintClientCore = require('../core/index');
+const PrintClientCore = require('../core/PrintClientCore');
 
 // Global references
 let tray = null;
 let mainWindow = null;
 let printClient = null;
 
-// Auto-launch configuration
-const autoLauncher = new AutoLaunch({
-  name: 'RepairMind Print Client',
-  path: app.getPath('exe')
-});
+// Auto-launch configuration (initialized in app.whenReady)
+let autoLauncher = null;
 
 // ═══════════════════════════════════════════════════════════════
 // APP LIFECYCLE
@@ -38,6 +37,12 @@ const autoLauncher = new AutoLaunch({
 
 app.whenReady().then(() => {
   log.info('App starting...', { version: app.getVersion() });
+
+  // Initialize auto-launcher now that app is ready
+  autoLauncher = new AutoLaunch({
+    name: 'RepairMind Print Client',
+    path: app.getPath('exe')
+  });
 
   // Create tray icon first
   createTray();
@@ -182,9 +187,13 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 600,
-    height: 700,
+    width: 650,
+    height: 750,
+    minWidth: 500,
+    minHeight: 600,
     show: false,
+    frame: false,
+    backgroundColor: '#0f0f0f',
     icon: path.join(__dirname, '../../build/icon.png'),
     webPreferences: {
       nodeIntegration: false,
@@ -343,6 +352,8 @@ async function toggleAutoLaunch(enable) {
 // ═══════════════════════════════════════════════════════════════
 
 function setupAutoUpdater() {
+  autoUpdater = require('electron-updater').autoUpdater;
+  autoUpdater.logger = log;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -369,6 +380,23 @@ function setupAutoUpdater() {
 // ═══════════════════════════════════════════════════════════════
 // IPC HANDLERS
 // ═══════════════════════════════════════════════════════════════
+
+// Window controls
+ipcMain.on('window-minimize', () => {
+  mainWindow?.minimize();
+});
+
+ipcMain.on('window-maximize', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow?.maximize();
+  }
+});
+
+ipcMain.on('window-close', () => {
+  mainWindow?.hide();
+});
 
 ipcMain.handle('get-status', () => {
   return {
@@ -404,6 +432,5 @@ ipcMain.handle('install-update', () => {
 });
 
 log.info('Main process initialized', {
-  version: app.getVersion(),
   platform: process.platform
 });
