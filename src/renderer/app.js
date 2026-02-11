@@ -22,6 +22,8 @@ const installUpdateBtn = document.getElementById('install-update');
 const toastContainer = document.getElementById('toast-container');
 const settingsPanel = document.getElementById('settings-panel');
 const settingsOverlay = document.getElementById('settings-overlay');
+const queueIndicator = document.getElementById('queue-indicator');
+const queueCountEl = document.getElementById('queue-count');
 
 // ═══════════════════════════════════════════════════════════════
 // INITIALIZATION
@@ -34,7 +36,22 @@ async function init() {
     // Get initial status
     const status = await window.electronAPI.getStatus();
     updateStatus(status);
+    updateQueueIndicator(status.queueStats);
     versionSpan.textContent = status.version;
+
+    // Load persisted recent jobs from queue
+    const persistedJobs = await window.electronAPI.getRecentJobs();
+    if (persistedJobs && persistedJobs.length > 0) {
+        recentJobs = persistedJobs.map(entry => ({
+            ...entry.job,
+            status: entry.status,
+            retries: entry.retries,
+            maxRetries: entry.maxRetries,
+            error: entry.error,
+            timestamp: new Date(entry.updatedAt)
+        }));
+        renderJobs();
+    }
 
     // Get config
     config = await window.electronAPI.getConfig();
@@ -102,8 +119,29 @@ function setupEventListeners() {
     });
 
     // Job completed
-    window.electronAPI.onJobCompleted((job) => {
-        addRecentJob(job, 'completed');
+    window.electronAPI.onJobCompleted((entry) => {
+        addRecentJob(entry.job || entry, 'completed', entry);
+        refreshQueueStats();
+    });
+
+    // Job failed permanently
+    window.electronAPI.onJobFailed((entry) => {
+        addRecentJob(entry.job, 'failed', entry);
+        showToast(`Job #${entry.id} failed after ${entry.retries} retries: ${entry.error}`, 'error');
+        refreshQueueStats();
+    });
+
+    // Job retrying
+    window.electronAPI.onJobRetrying((entry) => {
+        addRecentJob(entry.job, 'retrying', entry);
+        showToast(`Job #${entry.id} retrying (${entry.retries}/${entry.maxRetries})...`, 'info');
+        refreshQueueStats();
+    });
+
+    // Job queued
+    window.electronAPI.onJobQueued((entry) => {
+        addRecentJob(entry.job, 'queued', entry);
+        refreshQueueStats();
     });
 
     // Errors
@@ -205,10 +243,61 @@ function renderPrinters() {
                 <div class="printer-name">${printer.displayName}</div>
                 <div class="printer-type">${printer.type} &middot; ${printer.interface || 'unknown'}</div>
             </div>
-            <span class="printer-status online">Online</span>
+            <div class="printer-actions">
+                <div class="test-dropdown">
+                    <button class="btn-test" title="Test print">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                        Test
+                    </button>
+                    <div class="test-menu">
+                        <button class="test-menu-item" data-printer="${printer.systemName}" data-type="thermal">Thermal Receipt</button>
+                        <button class="test-menu-item" data-printer="${printer.systemName}" data-type="pdf">PDF Invoice</button>
+                        <button class="test-menu-item" data-printer="${printer.systemName}" data-type="label">Label</button>
+                    </div>
+                </div>
+                <span class="printer-status online">Online</span>
+            </div>
         </div>
     `).join('');
+
+    // Bind test print buttons
+    document.querySelectorAll('.btn-test').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const menu = btn.nextElementSibling;
+            // Close all other menus
+            document.querySelectorAll('.test-menu.open').forEach(m => {
+                if (m !== menu) m.classList.remove('open');
+            });
+            menu.classList.toggle('open');
+        });
+    });
+
+    document.querySelectorAll('.test-menu-item').forEach(item => {
+        item.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const printerName = item.dataset.printer;
+            const type = item.dataset.type;
+
+            // Close menu
+            item.parentElement.classList.remove('open');
+
+            const result = await window.electronAPI.testPrint(printerName, type);
+            if (result.success) {
+                showToast(`Test ${type} sent to ${printerName}`, 'success');
+            } else {
+                showToast(`Test failed: ${result.error}`, 'error');
+            }
+        });
+    });
 }
+
+// Close test menus when clicking outside
+document.addEventListener('click', () => {
+    document.querySelectorAll('.test-menu.open').forEach(m => m.classList.remove('open'));
+});
 
 function getPrinterIcon(type) {
     const icons = {
@@ -223,12 +312,38 @@ function getPrinterIcon(type) {
 // JOBS
 // ═══════════════════════════════════════════════════════════════
 
-function addRecentJob(job, status) {
-    recentJobs.unshift({ ...job, status, timestamp: new Date() });
-    if (recentJobs.length > 10) {
-        recentJobs = recentJobs.slice(0, 10);
+function addRecentJob(job, status, entry = null) {
+    // Update existing job if already in list (e.g. queued → processing → completed)
+    const existingIndex = recentJobs.findIndex(j => j.id === job.id);
+    const jobData = {
+        ...job,
+        status,
+        retries: entry?.retries || 0,
+        maxRetries: entry?.maxRetries || 3,
+        error: entry?.error || null,
+        timestamp: new Date()
+    };
+
+    if (existingIndex >= 0) {
+        recentJobs[existingIndex] = jobData;
+    } else {
+        recentJobs.unshift(jobData);
+        if (recentJobs.length > 20) {
+            recentJobs = recentJobs.slice(0, 20);
+        }
     }
     renderJobs();
+}
+
+function getStatusBadge(job) {
+    const statusLabels = {
+        completed: 'Completed',
+        failed: `Failed (${job.retries}/${job.maxRetries})`,
+        retrying: `Retrying (${job.retries}/${job.maxRetries})`,
+        queued: 'Queued',
+        processing: 'Printing...'
+    };
+    return statusLabels[job.status] || job.status;
 }
 
 function renderJobs() {
@@ -248,11 +363,27 @@ function renderJobs() {
         <div class="job-item fade-in">
             <div class="job-info">
                 <div class="job-id">Job #${job.id}</div>
-                <div class="job-printer">${job.printerSystemName || 'Unknown printer'}</div>
+                <div class="job-printer">${job.printerSystemName || 'Unknown printer'}${job.error ? ` — ${job.error}` : ''}</div>
             </div>
-            <span class="job-status ${job.status}">${job.status}</span>
+            <span class="job-status ${job.status}">${getStatusBadge(job)}</span>
         </div>
     `).join('');
+}
+
+async function refreshQueueStats() {
+    const stats = await window.electronAPI.getQueueStats();
+    updateQueueIndicator(stats);
+}
+
+function updateQueueIndicator(stats) {
+    if (!stats) return;
+    const pending = stats.queued + stats.processing;
+    if (pending > 0) {
+        queueIndicator.style.display = 'flex';
+        queueCountEl.textContent = pending;
+    } else {
+        queueIndicator.style.display = 'none';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

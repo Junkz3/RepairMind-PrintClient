@@ -17,8 +17,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Get current status
   getStatus: () => ipcRenderer.invoke('get-status'),
 
+  // Queue stats and recent jobs
+  getQueueStats: () => ipcRenderer.invoke('get-queue-stats'),
+  getRecentJobs: () => ipcRenderer.invoke('get-recent-jobs'),
+
   // Refresh printers
   refreshPrinters: () => ipcRenderer.invoke('refresh-printers'),
+
+  // Test print (no backend needed)
+  testPrint: (printerSystemName, type) => ipcRenderer.invoke('test-print', { printerSystemName, type }),
 
   // Get configuration
   getConfig: () => ipcRenderer.invoke('get-config'),
@@ -42,6 +49,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   onJobCompleted: (callback) => {
     ipcRenderer.on('job-completed', (event, data) => callback(data));
+  },
+
+  onJobFailed: (callback) => {
+    ipcRenderer.on('job-failed', (event, data) => callback(data));
+  },
+
+  onJobRetrying: (callback) => {
+    ipcRenderer.on('job-retrying', (event, data) => callback(data));
+  },
+
+  onJobQueued: (callback) => {
+    ipcRenderer.on('job-queued', (event, data) => callback(data));
   },
 
   onError: (callback) => {

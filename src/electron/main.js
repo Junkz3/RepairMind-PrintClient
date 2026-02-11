@@ -290,10 +290,31 @@ async function initializePrintClient() {
       }
     });
 
-    printClient.on('job-completed', (job) => {
-      log.info('Print job completed', { jobId: job.id });
+    printClient.on('job-completed', (entry) => {
+      log.info('Print job completed', { jobId: entry.id });
       if (mainWindow) {
-        mainWindow.webContents.send('job-completed', job);
+        mainWindow.webContents.send('job-completed', entry);
+      }
+    });
+
+    printClient.on('job-failed', (entry) => {
+      log.error('Print job failed permanently', { jobId: entry.id, error: entry.error, retries: entry.retries });
+      if (mainWindow) {
+        mainWindow.webContents.send('job-failed', entry);
+      }
+    });
+
+    printClient.on('job-retrying', (entry) => {
+      log.warn('Print job retrying', { jobId: entry.id, retries: entry.retries, delay: entry.delay });
+      if (mainWindow) {
+        mainWindow.webContents.send('job-retrying', entry);
+      }
+    });
+
+    printClient.on('job-queued', (entry) => {
+      log.info('Print job queued', { jobId: entry.id });
+      if (mainWindow) {
+        mainWindow.webContents.send('job-queued', entry);
       }
     });
 
@@ -407,8 +428,17 @@ ipcMain.handle('get-status', () => {
   return {
     connected: printClient?.isConnected() || false,
     printers: printClient?.getPrinters() || [],
-    version: app.getVersion()
+    version: app.getVersion(),
+    queueStats: printClient?.getQueueStats() || { queued: 0, processing: 0, completed: 0, failed: 0, total: 0 }
   };
+});
+
+ipcMain.handle('get-queue-stats', () => {
+  return printClient?.getQueueStats() || { queued: 0, processing: 0, completed: 0, failed: 0, total: 0 };
+});
+
+ipcMain.handle('get-recent-jobs', () => {
+  return printClient?.getRecentJobs(20) || [];
 });
 
 ipcMain.handle('refresh-printers', async () => {
@@ -416,6 +446,20 @@ ipcMain.handle('refresh-printers', async () => {
     return await printClient.refreshPrinters();
   }
   return [];
+});
+
+ipcMain.handle('test-print', async (event, { printerSystemName, type }) => {
+  if (!printClient) {
+    return { success: false, error: 'Print client not initialized' };
+  }
+  try {
+    const job = printClient.testPrint(printerSystemName, type);
+    log.info('Test print enqueued', { jobId: job.id, printer: printerSystemName, type });
+    return { success: true, jobId: job.id };
+  } catch (error) {
+    log.error('Test print failed', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('get-config', () => {

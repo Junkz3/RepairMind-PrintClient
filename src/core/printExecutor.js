@@ -8,6 +8,7 @@
 const printer = require('@thiagoelg/node-printer');
 const { ThermalPrinter, PrinterTypes } = require('node-thermal-printer');
 const PDFDocument = require('pdfkit');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -45,10 +46,16 @@ class PrintExecutor {
       case 'report':
         return this.printPDF(job, printerInfo);
 
+      case 'pdf_raw':
+        return this.printPDFFromSource(job, printerInfo);
+
       case 'label':
       case 'barcode':
       case 'qrcode':
         return this.printLabel(job, printerInfo);
+
+      case 'raw':
+        return this.printRaw(job, printerInfo);
 
       default:
         throw new Error(`Unsupported document type: ${job.documentType}`);
@@ -69,6 +76,7 @@ class PrintExecutor {
       const thermalPrinter = new ThermalPrinter({
         type: printerType,
         interface: `printer:${printerInfo.systemName}`,
+        driver: printer,
         width: job.options?.paperSize === '58mm' ? 32 : 48,
         characterSet: 'PC437_USA'
       });
@@ -181,6 +189,12 @@ class PrintExecutor {
    * @returns {Promise<void>}
    */
   async printPDF(job, printerInfo) {
+    // If backend sent a pre-rendered PDF (URL or base64), print it directly
+    if (job.content.pdfUrl || job.content.pdfBase64) {
+      return this.printPDFFromSource(job, printerInfo);
+    }
+
+    // Otherwise generate PDF from structured content (legacy behavior)
     return new Promise((resolve, reject) => {
       try {
         const pdfPath = path.join(this.tempDir, `job_${job.id}.pdf`);
@@ -201,24 +215,9 @@ class PrintExecutor {
         doc.end();
 
         stream.on('finish', () => {
-          // Print PDF using system printer
-          printer.printFile({
-            filename: pdfPath,
-            printer: printerInfo.systemName,
-            success: (jobID) => {
-              // Clean up temp file
-              setTimeout(() => {
-                if (fs.existsSync(pdfPath)) {
-                  fs.unlinkSync(pdfPath);
-                }
-              }, 5000);
-
-              resolve();
-            },
-            error: (err) => {
-              reject(new Error(`PDF print failed: ${err.message}`));
-            }
-          });
+          this.sendFileToPrinter(pdfPath, printerInfo.systemName)
+            .then(resolve)
+            .catch(reject);
         });
 
         stream.on('error', (error) => {
@@ -227,6 +226,179 @@ class PrintExecutor {
       } catch (error) {
         reject(error);
       }
+    });
+  }
+
+  /**
+   * Print a PDF from URL or base64 source
+   * @param {Object} job - Print job with content.pdfUrl or content.pdfBase64
+   * @param {Object} printerInfo - Printer info
+   */
+  async printPDFFromSource(job, printerInfo) {
+    const pdfPath = path.join(this.tempDir, `job_${job.id}.pdf`);
+
+    try {
+      if (job.content.pdfUrl) {
+        // Download PDF from URL
+        await this.downloadFile(job.content.pdfUrl, pdfPath);
+      } else if (job.content.pdfBase64) {
+        // Decode base64 to file
+        const buffer = Buffer.from(job.content.pdfBase64, 'base64');
+        fs.writeFileSync(pdfPath, buffer);
+      } else {
+        throw new Error('No PDF source provided (pdfUrl or pdfBase64 required)');
+      }
+
+      await this.sendFileToPrinter(pdfPath, printerInfo.systemName);
+    } catch (error) {
+      throw new Error(`PDF print failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Download a file from URL to local path
+   * @param {string} url - Source URL
+   * @param {string} destPath - Destination file path
+   */
+  async downloadFile(url, destPath) {
+    const https = url.startsWith('https') ? require('https') : require('http');
+
+    return new Promise((resolve, reject) => {
+      const file = fs.createWriteStream(destPath);
+
+      https.get(url, (response) => {
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          // Follow redirect
+          file.close();
+          fs.unlinkSync(destPath);
+          return this.downloadFile(response.headers.location, destPath).then(resolve).catch(reject);
+        }
+
+        if (response.statusCode !== 200) {
+          file.close();
+          fs.unlinkSync(destPath);
+          return reject(new Error(`Download failed: HTTP ${response.statusCode}`));
+        }
+
+        response.pipe(file);
+
+        file.on('finish', () => {
+          file.close(resolve);
+        });
+      }).on('error', (error) => {
+        file.close();
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+        reject(new Error(`Download failed: ${error.message}`));
+      });
+    });
+  }
+
+  /**
+   * Send a file to a system printer (platform-aware)
+   * @param {string} filePath - Path to file to print
+   * @param {string} printerName - System printer name
+   */
+  sendFileToPrinter(filePath, printerName) {
+    const cleanupLater = () => {
+      setTimeout(() => {
+        if (fs.existsSync(filePath)) {
+          try { fs.unlinkSync(filePath); } catch (_) {}
+        }
+      }, 15000);
+    };
+
+    // Try Electron's BrowserWindow.print() first (works on all platforms)
+    try {
+      const { BrowserWindow } = require('electron');
+      return this.printFileElectron(filePath, printerName, BrowserWindow)
+        .then(() => { cleanupLater(); });
+    } catch (_) {
+      // Electron not available (CLI mode) — use system commands
+    }
+
+    if (process.platform === 'win32') {
+      // Fallback: use Windows lpr command (available when Print Services are enabled)
+      return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); });
+    } else if (process.platform === 'darwin') {
+      return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); });
+    } else {
+      return this.printFileUnix(filePath, printerName, 'lp').then(() => { cleanupLater(); });
+    }
+  }
+
+  /**
+   * Print file using Electron's hidden BrowserWindow + webContents.print()
+   * Uses Chromium's built-in PDF renderer — works on all platforms.
+   * @param {string} filePath - Path to PDF file
+   * @param {string} printerName - Target printer name
+   * @param {typeof import('electron').BrowserWindow} BrowserWindow
+   */
+  printFileElectron(filePath, printerName, BrowserWindow) {
+    return new Promise((resolve, reject) => {
+      const win = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true
+        }
+      });
+
+      // Load PDF via file:// URL — Chromium renders it natively
+      const fileUrl = `file://${filePath.replace(/\\/g, '/')}`;
+      win.loadURL(fileUrl);
+
+      win.webContents.on('did-finish-load', () => {
+        // Small delay to let the PDF renderer finish
+        setTimeout(() => {
+          win.webContents.print({
+            silent: true,
+            deviceName: printerName,
+            printBackground: true
+          }, (success, failureReason) => {
+            win.destroy();
+            if (success) {
+              resolve();
+            } else {
+              reject(new Error(`Electron print failed: ${failureReason}`));
+            }
+          });
+        }, 500);
+      });
+
+      win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        win.destroy();
+        reject(new Error(`Failed to load PDF: ${errorDescription}`));
+      });
+
+      // Safety timeout
+      setTimeout(() => {
+        if (!win.isDestroyed()) {
+          win.destroy();
+          reject(new Error('Print timeout (30s)'));
+        }
+      }, 30000);
+    });
+  }
+
+  /**
+   * Print file on macOS/Linux using lpr/lp
+   * @param {string} filePath - Path to file
+   * @param {string} printerName - Printer name
+   * @param {string} command - 'lpr' (macOS/Win) or 'lp' (Linux)
+   */
+  printFileUnix(filePath, printerName, command) {
+    return new Promise((resolve, reject) => {
+      const args = command === 'lpr'
+        ? ['-P', printerName, filePath]
+        : ['-d', printerName, filePath];
+
+      execFile(command, args, { timeout: 30000 }, (error) => {
+        if (error) {
+          reject(new Error(`Print failed: ${error.message}`));
+        } else {
+          resolve();
+        }
+      });
     });
   }
 
@@ -323,15 +495,129 @@ class PrintExecutor {
   }
 
   /**
-   * Print label (barcode/QR code)
+   * Print label (ZPL, raw data, or generated PDF label)
    * @param {Object} job - Print job
    * @param {Object} printerInfo - Printer info
-   * @returns {Promise<void>}
    */
   async printLabel(job, printerInfo) {
-    // TODO: Implement label printing (Dymo, Brother, Zebra)
-    // This requires specific drivers for label printers
-    throw new Error('Label printing not yet implemented');
+    const content = job.content;
+
+    // Mode 1: Raw ZPL commands (Zebra printers)
+    if (content.zpl) {
+      return this.printRawData(content.zpl, printerInfo.systemName, 'RAW');
+    }
+
+    // Mode 2: Raw data (any format — EPL, TSPL, etc.)
+    if (content.rawData) {
+      return this.printRawData(content.rawData, printerInfo.systemName, 'RAW');
+    }
+
+    // Mode 3: Pre-rendered label as base64/URL
+    if (content.pdfUrl || content.pdfBase64) {
+      return this.printPDFFromSource(job, printerInfo);
+    }
+
+    // Mode 4: Generate simple label PDF from structured content
+    return this.printGeneratedLabel(job, printerInfo);
+  }
+
+  /**
+   * Generate and print a simple label from structured content
+   * @param {Object} job - Print job
+   * @param {Object} printerInfo - Printer info
+   */
+  async printGeneratedLabel(job, printerInfo) {
+    const content = job.content;
+    const pdfPath = path.join(this.tempDir, `label_${job.id}.pdf`);
+
+    // Label dimensions (default 62mm x 29mm ≈ 176pt x 82pt)
+    const labelWidth = job.options?.labelWidth || 176;
+    const labelHeight = job.options?.labelHeight || 82;
+
+    return new Promise((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({
+          size: [labelWidth, labelHeight],
+          margins: { top: 5, bottom: 5, left: 5, right: 5 }
+        });
+
+        const stream = fs.createWriteStream(pdfPath);
+        doc.pipe(stream);
+
+        // Title line
+        if (content.title) {
+          doc.fontSize(10).font('Helvetica-Bold').text(content.title, { align: 'center' });
+        }
+
+        // Subtitle / SKU
+        if (content.subtitle || content.sku) {
+          doc.fontSize(7).font('Helvetica').text(content.subtitle || content.sku, { align: 'center' });
+        }
+
+        // Price
+        if (content.price) {
+          doc.moveDown(0.3);
+          doc.fontSize(12).font('Helvetica-Bold').text(content.price, { align: 'center' });
+        }
+
+        // Barcode text (visual representation — actual barcode needs ZPL or image)
+        if (content.barcodeText) {
+          doc.moveDown(0.3);
+          doc.fontSize(6).font('Helvetica').text(content.barcodeText, { align: 'center' });
+        }
+
+        doc.end();
+
+        stream.on('finish', () => {
+          this.sendFileToPrinter(pdfPath, printerInfo.systemName)
+            .then(resolve)
+            .catch(reject);
+        });
+
+        stream.on('error', (error) => {
+          reject(new Error(`Label creation failed: ${error.message}`));
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Print raw data directly to printer (ZPL, EPL, PCL, PostScript, etc.)
+   * @param {string|Buffer} data - Raw data to send
+   * @param {string} printerName - System printer name
+   * @param {string} doctype - Document type for the driver (RAW, TEXT, etc.)
+   */
+  printRawData(data, printerName, doctype = 'RAW') {
+    return new Promise((resolve, reject) => {
+      try {
+        printer.printDirect({
+          data: typeof data === 'string' ? Buffer.from(data) : data,
+          printer: printerName,
+          type: doctype,
+          success: () => resolve(),
+          error: (err) => reject(new Error(`Raw print failed: ${err.message}`))
+        });
+      } catch (error) {
+        reject(new Error(`Raw print failed: ${error.message}`));
+      }
+    });
+  }
+
+  /**
+   * Print raw document type (any data sent directly to printer)
+   * @param {Object} job - Print job with content.rawData or content.data
+   * @param {Object} printerInfo - Printer info
+   */
+  async printRaw(job, printerInfo) {
+    const data = job.content.rawData || job.content.data;
+    if (!data) {
+      throw new Error('No raw data provided (rawData or data field required)');
+    }
+
+    const doctype = job.options?.doctype || 'RAW';
+    return this.printRawData(data, printerInfo.systemName, doctype);
   }
 
   /**
