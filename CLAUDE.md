@@ -21,6 +21,21 @@ npm run legacy:start       # Run headless CLI mode (node src/core/index.js)
 
 No test or lint tooling is configured.
 
+## IMPORTANT: Running Electron from Claude Code / VSCode
+
+VSCode and Claude Code set `ELECTRON_RUN_AS_NODE=1` in the shell environment. This makes Electron run as plain Node.js instead of a desktop app, causing `app` to be `undefined` and a crash on `app.whenReady()`.
+
+**Never run `npx electron .` directly from the Claude Code bash tool.** Instead, use `dev.bat` which clears the variable:
+
+```bash
+cmd /c "start \"RepairMind Dev\" c:\Users\E.repare\Documents\Repairmind\RepairMind-PrintClient\dev.bat"
+```
+
+Or to build the exe (doesn't need Electron runtime, so it works directly):
+```bash
+npm run build:win
+```
+
 ## Architecture
 
 **Plain JavaScript (ES6+), no TypeScript, no UI framework** — the renderer uses vanilla HTML/CSS/JS.

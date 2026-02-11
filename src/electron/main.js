@@ -27,6 +27,7 @@ const PrintClientCore = require('../core/PrintClientCore');
 let tray = null;
 let mainWindow = null;
 let printClient = null;
+let isQuitting = false;
 
 // Auto-launch configuration (initialized in app.whenReady)
 let autoLauncher = null;
@@ -79,6 +80,7 @@ app.on('activate', () => {
 // Quit when requested
 app.on('before-quit', () => {
   log.info('App quitting...');
+  isQuitting = true;
   if (printClient) {
     printClient.stop();
   }
@@ -210,10 +212,12 @@ function createWindow() {
   }
 
   mainWindow.on('close', (event) => {
-    // Minimize to tray instead of closing
-    event.preventDefault();
-    mainWindow.hide();
-    log.info('Window hidden to tray');
+    if (!isQuitting) {
+      // Minimize to tray instead of closing
+      event.preventDefault();
+      mainWindow.hide();
+      log.info('Window hidden to tray');
+    }
   });
 
   mainWindow.on('closed', () => {
