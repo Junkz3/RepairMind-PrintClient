@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Get current status
   getStatus: () => ipcRenderer.invoke('get-status'),
 
+  // Refresh printers
+  refreshPrinters: () => ipcRenderer.invoke('refresh-printers'),
+
   // Get configuration
   getConfig: () => ipcRenderer.invoke('get-config'),
 

@@ -132,10 +132,14 @@ function setupEventListeners() {
         refreshPrintersBtn.classList.add('spinning');
         refreshPrintersBtn.disabled = true;
 
-        setTimeout(() => {
-            refreshPrintersBtn.classList.remove('spinning');
-            refreshPrintersBtn.disabled = false;
-        }, 2000);
+        try {
+            await window.electronAPI.refreshPrinters();
+        } catch (e) {
+            showToast('Failed to refresh printers', 'error');
+        }
+
+        refreshPrintersBtn.classList.remove('spinning');
+        refreshPrintersBtn.disabled = false;
     });
 
     // Download update

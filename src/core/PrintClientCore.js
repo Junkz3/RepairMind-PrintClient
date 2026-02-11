@@ -26,6 +26,7 @@ class PrintClientCore extends EventEmitter {
     this.detector = new PrinterDetector();
     this.executor = new PrintExecutor();
     this.socket = null;
+    this.detectedPrinters = [];
     this.registeredPrinters = new Map();
     this.heartbeatInterval = null;
     this.connected = false;
@@ -35,19 +36,23 @@ class PrintClientCore extends EventEmitter {
    * Start the print client
    */
   async start() {
+    this.emit('starting');
+
+    // Step 1: Detect printers (always runs, independent of backend)
     try {
-      this.emit('starting');
+      this.detectedPrinters = await this.detector.detectPrinters();
+      this.emit('printers-updated', this.detectedPrinters);
+    } catch (error) {
+      this.emit('error', new Error(`Printer detection failed: ${error.message}`));
+      this.detectedPrinters = [];
+    }
 
-      // Step 1: Detect printers
-      const printers = await this.detector.detectPrinters();
-      this.emit('printers-detected', printers);
+    if (this.detectedPrinters.length === 0) {
+      this.emit('warning', 'No printers detected.');
+    }
 
-      // Allow starting with no printers (can be added later)
-      if (printers.length === 0) {
-        this.emit('warning', 'No printers detected. Continuing without printers...');
-      }
-
-      // Step 2: Connect to backend
+    // Step 2: Connect to backend (non-blocking — printers show even if offline)
+    try {
       this.socket = new SocketClient({
         url: this.config.websocketUrl,
         tenantId: this.config.tenantId,
@@ -63,9 +68,9 @@ class PrintClientCore extends EventEmitter {
       this.connected = true;
       this.emit('connected');
 
-      // Step 3: Register printers
-      if (printers.length > 0 && this.config.autoRegister) {
-        for (const printer of printers) {
+      // Step 3: Register printers with backend
+      if (this.detectedPrinters.length > 0 && this.config.autoRegister) {
+        for (const printer of this.detectedPrinters) {
           try {
             await this.socket.registerPrinter(printer);
             this.registeredPrinters.set(printer.systemName, printer);
@@ -74,18 +79,14 @@ class PrintClientCore extends EventEmitter {
             this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
           }
         }
-
-        this.emit('printers-updated', Array.from(this.registeredPrinters.values()));
       }
 
       // Step 4: Start heartbeat
       this.startHeartbeat();
-
       this.emit('ready');
 
     } catch (error) {
       this.emit('error', error);
-      throw error;
     }
   }
 
@@ -169,7 +170,7 @@ class PrintClientCore extends EventEmitter {
    * Get registered printers
    */
   getPrinters() {
-    return Array.from(this.registeredPrinters.values());
+    return this.detectedPrinters;
   }
 
   /**
@@ -223,21 +224,25 @@ class PrintClientCore extends EventEmitter {
    * Refresh printer list
    */
   async refreshPrinters() {
-    const printers = await this.detector.detectPrinters();
-    this.emit('printers-detected', printers);
+    this.detectedPrinters = await this.detector.detectPrinters();
+    this.emit('printers-updated', this.detectedPrinters);
 
-    // Register new printers
-    for (const printer of printers) {
-      if (!this.registeredPrinters.has(printer.systemName)) {
-        try {
-          await this.registerPrinter(printer);
-        } catch (error) {
-          this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
+    // Register new printers with backend if connected
+    if (this.connected && this.socket) {
+      for (const printer of this.detectedPrinters) {
+        if (!this.registeredPrinters.has(printer.systemName)) {
+          try {
+            await this.socket.registerPrinter(printer);
+            this.registeredPrinters.set(printer.systemName, printer);
+            this.emit('printer-registered', printer);
+          } catch (error) {
+            this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
+          }
         }
       }
     }
 
-    return printers;
+    return this.detectedPrinters;
   }
 }
 

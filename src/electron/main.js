@@ -258,16 +258,17 @@ async function initializePrintClient() {
 
     printClient.on('disconnected', () => {
       log.warn('Print client disconnected from backend');
+      const printers = printClient.getPrinters();
       updateTrayMenu({
         connected: false,
-        printers: [],
+        printers: printers,
         autoLaunch: false
       });
 
       if (mainWindow) {
         mainWindow.webContents.send('status-update', {
           connected: false,
-          printers: []
+          printers: printers
         });
       }
     });
@@ -404,6 +405,13 @@ ipcMain.handle('get-status', () => {
     printers: printClient?.getPrinters() || [],
     version: app.getVersion()
   };
+});
+
+ipcMain.handle('refresh-printers', async () => {
+  if (printClient) {
+    return await printClient.refreshPrinters();
+  }
+  return [];
 });
 
 ipcMain.handle('get-config', () => {
