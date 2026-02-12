@@ -11,7 +11,16 @@ const printer = require('@thiagoelg/node-printer');
 
 class SpoolerMonitor {
   constructor({ logger } = {}) {
-    this.logger = logger || console;
+    // Wrap logger to support both console-style and EventEmitter-style loggers
+    if (logger && typeof logger.info === 'function') {
+      this.logger = logger;
+    } else {
+      this.logger = {
+        info: (...args) => console.log(...args),
+        warn: (...args) => console.warn(...args),
+        error: (...args) => console.error(...args),
+      };
+    }
     this.activeJobs = new Map(); // osJobId -> { printerName, callback, interval }
     this.pollInterval = 2000; // 2 seconds
     this.maxPollTime = 120000; // 2 minutes max monitoring per job
