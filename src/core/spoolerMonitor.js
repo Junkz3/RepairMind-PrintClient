@@ -51,6 +51,8 @@ class SpoolerMonitor {
     this.logger.info(`[SpoolerMonitor] Monitoring job ${numericJobId} on ${printerName}`);
 
     let lastStatus = null;
+    let sawPrinting = false;   // Did we ever see the job actively PRINTING?
+    let lastHadError = false;  // Was the last known status an error state?
 
     const interval = setInterval(() => {
       try {
@@ -66,17 +68,32 @@ class SpoolerMonitor {
         try {
           jobInfo = printer.getJob(printerName, numericJobId);
         } catch (err) {
-          // Job no longer exists in spooler = completed or removed
-          this.logger.info(`[SpoolerMonitor] Job ${numericJobId} no longer in spooler — completed`);
+          // Job no longer exists in spooler — determine if completed or cancelled
           this._cleanup(jobKey);
-          onStatusChange('completed', { message: 'Job finished and removed from spooler' });
+          if (sawPrinting && !lastHadError) {
+            // We saw it printing normally then it disappeared → completed
+            this.logger.info(`[SpoolerMonitor] Job ${numericJobId} finished printing and removed from spooler`);
+            onStatusChange('completed', { message: 'Job finished and removed from spooler' });
+          } else if (lastHadError) {
+            // Last state was an error (paper out, blocked) then disappeared → likely cancelled
+            this.logger.info(`[SpoolerMonitor] Job ${numericJobId} disappeared after error — marking as failed`);
+            onStatusChange('failed', { message: 'Job removed from spooler after error (likely cancelled)', osStatus: lastStatus });
+          } else {
+            // Never saw it print, just disappeared → cancelled or removed
+            this.logger.info(`[SpoolerMonitor] Job ${numericJobId} disappeared without printing — marking as failed`);
+            onStatusChange('failed', { message: 'Job removed from spooler before printing (cancelled)', osStatus: lastStatus });
+          }
           return;
         }
 
         if (!jobInfo) {
-          // Job disappeared from spooler
+          // Job disappeared from spooler — same logic
           this._cleanup(jobKey);
-          onStatusChange('completed', { message: 'Job completed (removed from spooler)' });
+          if (sawPrinting && !lastHadError) {
+            onStatusChange('completed', { message: 'Job completed (removed from spooler)' });
+          } else {
+            onStatusChange('failed', { message: 'Job removed from spooler (cancelled)', osStatus: lastStatus });
+          }
           return;
         }
 
@@ -111,6 +128,7 @@ class SpoolerMonitor {
 
         // Check for error states (paper jam, out of paper, etc.)
         if (statusArr.includes('BLOCKED') || statusArr.includes('ERROR') || statusArr.includes('OFFLINE') || statusArr.includes('PAPEROUT') || statusArr.includes('PAPER_OUT')) {
+          lastHadError = true;
           // Don't mark as failed yet — these can be temporary
           // Report as still printing but with error details
           onStatusChange('printing', {
@@ -123,6 +141,8 @@ class SpoolerMonitor {
 
         // PRINTING or PENDING — still in progress
         if (statusArr.includes('PRINTING')) {
+          sawPrinting = true;
+          lastHadError = false; // Clear error flag when printing resumes
           onStatusChange('printing', { message: 'Printing in progress', osStatus: statusArr });
         }
 
