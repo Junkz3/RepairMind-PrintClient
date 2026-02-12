@@ -308,23 +308,23 @@ class PrintExecutor {
       }, 15000);
     };
 
-    // Try Electron's BrowserWindow.print() first (works on all platforms)
+    // Windows & Linux: use printDirect/lp for OS job ID tracking (spooler monitoring)
+    if (process.platform === 'win32') {
+      return this.printFileWithTracking(filePath, printerName).then((result) => { cleanupLater(); return result; });
+    } else if (process.platform === 'linux') {
+      return this.printFileLinux(filePath, printerName).then((result) => { cleanupLater(); return result; });
+    }
+
+    // macOS: try Electron first, fallback to lpr
     try {
       const { BrowserWindow } = require('electron');
       return this.printFileElectron(filePath, printerName, BrowserWindow)
-        .then(() => { cleanupLater(); return { osJobId: null }; }); // Electron doesn't expose OS job ID
+        .then(() => { cleanupLater(); return { osJobId: null }; });
     } catch (_) {
-      // Electron not available (CLI mode) — use system commands
+      // Electron not available (CLI mode)
     }
 
-    if (process.platform === 'win32') {
-      return this.printFileWithTracking(filePath, printerName).then((result) => { cleanupLater(); return result; });
-    } else if (process.platform === 'darwin') {
-      return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); return { osJobId: null }; });
-    } else {
-      // Linux: lp returns job ID in output
-      return this.printFileLinux(filePath, printerName).then((result) => { cleanupLater(); return result; });
-    }
+    return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); return { osJobId: null }; });
   }
 
   /**
