@@ -530,17 +530,20 @@ ipcMain.handle('login', async (event, { email, password }) => {
       return { success: false, error: error.message || 'Login failed' };
     }
 
-    const data = await response.json();
+    const response_data = await response.json();
+
+    // Backend returns: { success: true, data: { user: {...}, token: "..." } }
+    const { user, token } = response_data.data || response_data;
 
     // Save credentials
     configManager.saveLoginCredentials({
-      token: data.token,
-      tenantId: data.user.tenantId,
-      apiKey: data.apiKey, // If provided by backend
-      user: data.user
+      token: token,
+      tenantId: user.tenantId,
+      apiKey: response_data.apiKey, // If provided by backend
+      user: user
     });
 
-    log.info('Login successful', { email, tenantId: data.user.tenantId });
+    log.info('Login successful', { email, tenantId: user.tenantId });
 
     // Restart print client with new credentials
     if (printClient) {
@@ -548,7 +551,7 @@ ipcMain.handle('login', async (event, { email, password }) => {
       await initializePrintClient();
     }
 
-    return { success: true, user: data.user, tenantId: data.user.tenantId };
+    return { success: true, user: user, tenantId: user.tenantId };
   } catch (error) {
     log.error('Login error', error);
     return { success: false, error: error.message };
