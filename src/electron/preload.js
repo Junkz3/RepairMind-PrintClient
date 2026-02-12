@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Update configuration
   updateConfig: (config) => ipcRenderer.invoke('update-config', config),
 
+  // Environment management
+  setEnvironment: (environment) => ipcRenderer.invoke('set-environment', environment),
+
+  // Authentication
+  login: (email, password) => ipcRenderer.invoke('login', { email, password }),
+  logout: () => ipcRenderer.invoke('logout'),
+
   // Auto-updater
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),

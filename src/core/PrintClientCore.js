@@ -10,19 +10,27 @@ const PrinterDetector = require('./printerDetector');
 const SocketClient = require('./socketClient');
 const PrintExecutor = require('./printExecutor');
 const JobQueue = require('./jobQueue');
+const ConfigManager = require('./ConfigManager');
 
 class PrintClientCore extends EventEmitter {
   constructor(config = {}) {
     super();
 
+    // Use ConfigManager for persistent storage
+    this.configManager = config.configManager || new ConfigManager();
+
+    // Get environment configuration
+    const envConfig = this.configManager.getEnvironmentConfig();
+
     this.config = {
-      backendUrl: config.backendUrl || process.env.BACKEND_URL || 'http://localhost:5001',
-      websocketUrl: config.websocketUrl || process.env.WEBSOCKET_URL || 'ws://localhost:5001',
-      tenantId: config.tenantId || process.env.TENANT_ID,
-      clientId: config.clientId || process.env.CLIENT_ID || `client-${Date.now()}`,
-      apiKey: config.apiKey || process.env.API_KEY,
-      heartbeatInterval: parseInt(config.heartbeatInterval || process.env.HEARTBEAT_INTERVAL || 30000),
-      autoRegister: config.autoRegister !== false
+      backendUrl: config.backendUrl || envConfig.backendUrl,
+      websocketUrl: config.websocketUrl || envConfig.websocketUrl,
+      tenantId: config.tenantId || this.configManager.getTenantId(),
+      clientId: config.clientId || this.configManager.getClientId(),
+      apiKey: config.apiKey || this.configManager.getApiKey(),
+      token: config.token || this.configManager.getToken(),
+      heartbeatInterval: config.heartbeatInterval || this.configManager.getHeartbeatInterval(),
+      autoRegister: config.autoRegister !== undefined ? config.autoRegister : this.configManager.getAutoRegister()
     };
 
     this.detector = new PrinterDetector();

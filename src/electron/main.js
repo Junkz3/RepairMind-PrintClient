@@ -22,12 +22,14 @@ let autoUpdater = null;
 
 // Print Client Core
 const PrintClientCore = require('../core/PrintClientCore');
+const ConfigManager = require('../core/ConfigManager');
 
 // Global references
 let tray = null;
 let mainWindow = null;
 let printClient = null;
 let isQuitting = false;
+let configManager = null;
 
 // Auto-launch configuration (initialized in app.whenReady)
 let autoLauncher = null;
@@ -38,6 +40,9 @@ let autoLauncher = null;
 
 app.whenReady().then(() => {
   log.info('App starting...', { version: app.getVersion() });
+
+  // Initialize configuration manager
+  configManager = new ConfigManager();
 
   // Initialize auto-launcher now that app is ready
   autoLauncher = new AutoLaunch({
@@ -241,7 +246,7 @@ function showWindow() {
 
 async function initializePrintClient() {
   try {
-    printClient = new PrintClientCore();
+    printClient = new PrintClientCore({ configManager });
 
     // Listen to print client events
     printClient.on('connected', () => {
@@ -463,7 +468,13 @@ ipcMain.handle('test-print', async (event, { printerSystemName, type }) => {
 });
 
 ipcMain.handle('get-config', () => {
-  return printClient?.getConfig() || {};
+  if (!configManager) {
+    return {};
+  }
+  return {
+    ...configManager.getAll(),
+    printClientConfig: printClient?.getConfig() || {}
+  };
 });
 
 ipcMain.handle('update-config', async (event, config) => {
@@ -473,6 +484,96 @@ ipcMain.handle('update-config', async (event, config) => {
     return { success: true };
   }
   return { success: false, error: 'Print client not initialized' };
+});
+
+ipcMain.handle('set-environment', async (event, environment) => {
+  if (!configManager) {
+    return { success: false, error: 'Config manager not initialized' };
+  }
+
+  try {
+    configManager.setEnvironment(environment);
+    log.info('Environment changed', { environment });
+
+    // Restart print client with new environment
+    if (printClient) {
+      printClient.stop();
+      await initializePrintClient();
+    }
+
+    return { success: true, environment };
+  } catch (error) {
+    log.error('Failed to set environment', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('login', async (event, { email, password }) => {
+  if (!configManager) {
+    return { success: false, error: 'Config manager not initialized' };
+  }
+
+  try {
+    const backendUrl = configManager.getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        isPrintNode: true // Flag pour obtenir un token de 90 jours
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return { success: false, error: error.message || 'Login failed' };
+    }
+
+    const data = await response.json();
+
+    // Save credentials
+    configManager.saveLoginCredentials({
+      token: data.token,
+      tenantId: data.user.tenantId,
+      apiKey: data.apiKey, // If provided by backend
+      user: data.user
+    });
+
+    log.info('Login successful', { email, tenantId: data.user.tenantId });
+
+    // Restart print client with new credentials
+    if (printClient) {
+      printClient.stop();
+      await initializePrintClient();
+    }
+
+    return { success: true, user: data.user, tenantId: data.user.tenantId };
+  } catch (error) {
+    log.error('Login error', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('logout', async () => {
+  if (!configManager) {
+    return { success: false, error: 'Config manager not initialized' };
+  }
+
+  try {
+    configManager.clearLoginCredentials();
+    log.info('Logout successful');
+
+    // Stop print client
+    if (printClient) {
+      printClient.stop();
+    }
+
+    return { success: true };
+  } catch (error) {
+    log.error('Logout error', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('check-for-updates', async () => {

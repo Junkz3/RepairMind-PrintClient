@@ -11,6 +11,75 @@
     <!-- Toast notifications container -->
     <div id="toast-container"></div>
 
+    <!-- Login Screen (shown when not authenticated) -->
+    <div class="login-screen" id="login-screen" style="display: none;">
+        <div class="login-container">
+            <div class="login-header">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                    <rect x="6" y="14" width="12" height="8"></rect>
+                </svg>
+                <h1>RepairMind Print Client</h1>
+                <p>Connectez-vous avec votre compte RepairMind</p>
+            </div>
+
+            <!-- Environment Selector -->
+            <div class="environment-selector">
+                <label class="env-option">
+                    <input type="radio" name="environment" value="development" id="env-dev" checked>
+                    <span class="env-label">
+                        <span class="env-name">Development</span>
+                        <span class="env-url">dev.repairmind.fr</span>
+                    </span>
+                </label>
+                <label class="env-option">
+                    <input type="radio" name="environment" value="production" id="env-prod">
+                    <span class="env-label">
+                        <span class="env-name">Production</span>
+                        <span class="env-url">app.repairmind.fr</span>
+                    </span>
+                </label>
+            </div>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">Email</label>
+                    <input
+                        type="email"
+                        id="login-email"
+                        placeholder="votre.email@entreprise.com"
+                        required
+                        autocomplete="email"
+                    />
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Mot de passe</label>
+                    <input
+                        type="password"
+                        id="login-password"
+                        placeholder="••••••••"
+                        required
+                        autocomplete="current-password"
+                    />
+                </div>
+                <div class="login-error" id="login-error" style="display: none;"></div>
+                <button type="submit" class="btn-primary btn-full" id="login-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                        <polyline points="10 17 15 12 10 7"></polyline>
+                        <line x1="15" y1="12" x2="3" y2="12"></line>
+                    </svg>
+                    <span>Se connecter</span>
+                </button>
+            </form>
+
+            <div class="login-footer">
+                <p>Version <span id="app-version">1.0.0</span></p>
+            </div>
+        </div>
+    </div>
+
     <!-- Custom title bar -->
     <div class="titlebar">
         <div class="titlebar-drag">

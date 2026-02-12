@@ -9,13 +9,14 @@ const { io } = require('socket.io-client');
 const EventEmitter = require('events');
 
 class SocketClient extends EventEmitter {
-  constructor({ url, tenantId, clientId, apiKey }) {
+  constructor({ url, tenantId, clientId, apiKey, token }) {
     super();
 
     this.url = url;
     this.tenantId = tenantId;
     this.clientId = clientId;
-    this.apiKey = apiKey;
+    this.apiKey = apiKey; // Deprecated - use token instead
+    this.token = token; // JWT token from login
     this.socket = null;
     this.authenticated = false;
   }
@@ -73,7 +74,8 @@ class SocketClient extends EventEmitter {
       this.socket.emit('authenticate', {
         tenantId: this.tenantId,
         clientId: this.clientId,
-        apiKey: this.apiKey
+        token: this.token, // Use JWT token
+        apiKey: this.apiKey // Fallback for backward compatibility
       });
 
       // Wait for authentication response

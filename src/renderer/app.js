@@ -6,6 +6,7 @@
 let printers = [];
 let recentJobs = [];
 let config = {};
+let isAuthenticated = false;
 
 // DOM Elements
 const statusDot = document.querySelector('.status-dot');
@@ -25,11 +26,110 @@ const settingsOverlay = document.getElementById('settings-overlay');
 const queueIndicator = document.getElementById('queue-indicator');
 const queueCountEl = document.getElementById('queue-count');
 
+// Login elements
+const loginScreen = document.getElementById('login-screen');
+const loginForm = document.getElementById('login-form');
+const loginError = document.getElementById('login-error');
+const loginBtn = document.getElementById('login-btn');
+const appVersionSpan = document.getElementById('app-version');
+
+// ═══════════════════════════════════════════════════════════════
+// AUTHENTICATION
+// ═══════════════════════════════════════════════════════════════
+
+async function checkAuthentication() {
+    const cfg = await window.electronAPI.getConfig();
+    config = cfg;
+    isAuthenticated = cfg.isAuthenticated || false;
+
+    if (!isAuthenticated) {
+        showLoginScreen();
+    } else {
+        hideLoginScreen();
+    }
+
+    return isAuthenticated;
+}
+
+function showLoginScreen() {
+    loginScreen.style.display = 'flex';
+    document.querySelector('.container').style.display = 'none';
+}
+
+function hideLoginScreen() {
+    loginScreen.style.display = 'none';
+    document.querySelector('.container').style.display = 'block';
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    const environment = document.querySelector('input[name="environment"]:checked').value;
+
+    if (!email || !password) {
+        showLoginError('Veuillez remplir tous les champs');
+        return;
+    }
+
+    // Disable button and show loading state
+    loginBtn.disabled = true;
+    const originalHTML = loginBtn.innerHTML;
+    loginBtn.innerHTML = '<span>Connexion en cours...</span>';
+
+    // Hide previous errors
+    loginError.style.display = 'none';
+
+    try {
+        // Set environment first
+        await window.electronAPI.setEnvironment(environment);
+
+        // Login
+        const result = await window.electronAPI.login(email, password);
+
+        if (result.success) {
+            showToast('Connexion réussie', 'success');
+            isAuthenticated = true;
+            hideLoginScreen();
+
+            // Reinitialize app with new credentials
+            await init();
+        } else {
+            showLoginError(result.error || 'Échec de la connexion');
+        }
+    } catch (error) {
+        showLoginError('Erreur de connexion: ' + error.message);
+    } finally {
+        loginBtn.disabled = false;
+        loginBtn.innerHTML = originalHTML;
+    }
+}
+
+function showLoginError(message) {
+    loginError.textContent = message;
+    loginError.style.display = 'flex';
+}
+
+async function handleLogout() {
+    if (confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
+        await window.electronAPI.logout();
+        isAuthenticated = false;
+        showLoginScreen();
+        showToast('Déconnexion réussie', 'info');
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // INITIALIZATION
 // ═══════════════════════════════════════════════════════════════
 
 async function init() {
+    // Check authentication first
+    const authenticated = await checkAuthentication();
+    if (!authenticated) {
+        return; // Stop here if not authenticated
+    }
     // Setup window controls
     setupWindowControls();
 
@@ -456,6 +556,20 @@ function showInstallButton(info) {
     installUpdateBtn.style.display = 'inline-flex';
     document.getElementById('update-message').textContent = `Version ${info.version} downloaded - ready to install`;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// LOGIN EVENT LISTENERS
+// ═══════════════════════════════════════════════════════════════
+
+loginForm?.addEventListener('submit', handleLogin);
+
+// Environment change
+document.querySelectorAll('input[name="environment"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        // Update visual feedback
+        loginError.style.display = 'none';
+    });
+});
 
 // Start app
 init();
