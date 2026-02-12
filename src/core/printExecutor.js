@@ -157,14 +157,16 @@ class PrintExecutor {
       printer.drawLine();
     }
 
-    // Total
-    printer.alignRight();
-    printer.bold(true);
-    printer.setTextDoubleHeight();
-    printer.println(`TOTAL: ${content.total?.toFixed(2) || '0.00'} EUR`);
-    printer.setTextNormal();
-    printer.bold(false);
-    printer.newLine();
+    // Total (only if provided)
+    if (content.total !== undefined && content.total !== null) {
+      printer.alignRight();
+      printer.bold(true);
+      printer.setTextDoubleHeight();
+      printer.println(`TOTAL: ${content.total.toFixed(2)} EUR`);
+      printer.setTextNormal();
+      printer.bold(false);
+      printer.newLine();
+    }
 
     // Footer
     if (content.footer) {
@@ -172,9 +174,13 @@ class PrintExecutor {
       printer.println(content.footer);
     }
 
-    printer.newLine();
-    printer.alignCenter();
-    printer.println('Merci de votre visite !');
+    // Thank you message (only for real receipts with items)
+    if (content.items && content.items.length > 0) {
+      printer.newLine();
+      printer.alignCenter();
+      printer.println('Merci de votre visite !');
+    }
+
     printer.newLine();
     printer.newLine();
 

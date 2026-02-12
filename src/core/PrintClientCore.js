@@ -517,16 +517,12 @@ class PrintClientCore extends EventEmitter {
         printerSystemName,
         content: {
           storeName: 'RepairMind',
-          storeAddress: '123 Test Street, Paris',
-          receiptNumber: testId,
+          receiptNumber: testId.slice(-6),
           clientName: 'Client Test',
-          phone: '01 23 45 67 89',
           items: [
-            { description: 'Réparation écran', quantity: 1, price: 89.99 },
-            { description: 'Protection verre trempé', quantity: 2, price: 14.99 },
-            { description: 'Main d\'oeuvre', quantity: 1, price: 25.00 }
+            { description: 'Réparation écran', quantity: 1, price: 89.99 }
           ],
-          total: 144.97,
+          total: 89.99,
           footer: '** TEST IMPRESSION **'
         },
         options: {}
@@ -536,19 +532,13 @@ class PrintClientCore extends EventEmitter {
         documentType: 'invoice',
         printerSystemName,
         content: {
-          invoiceNumber: testId,
-          companyName: 'RepairMind SAS',
-          companyAddress: '123 Test Street, 75001 Paris',
-          companyPhone: '01 23 45 67 89',
+          invoiceNumber: 'TEST-' + testId.slice(-6),
+          companyName: 'RepairMind',
           clientName: 'Client Test',
-          clientAddress: '456 Avenue du Test, 75002 Paris',
-          clientPhone: '09 87 65 43 21',
           items: [
-            { description: 'Réparation écran iPhone 15', quantity: 1, price: 189.00 },
-            { description: 'Batterie neuve', quantity: 1, price: 49.99 },
-            { description: 'Main d\'oeuvre', quantity: 1, price: 35.00 }
+            { description: 'Réparation écran iPhone 15', quantity: 1, price: 89.99 }
           ],
-          total: 273.99,
+          total: 89.99,
           footer: '** TEST IMPRESSION — Ce document n\'a aucune valeur **'
         },
         options: {}
@@ -558,11 +548,9 @@ class PrintClientCore extends EventEmitter {
         documentType: 'label',
         printerSystemName,
         content: {
-          title: 'iPhone 15 Pro Max',
+          title: 'iPhone 15 Pro',
           subtitle: 'Réparation écran',
-          sku: 'RM-2024-' + testId.slice(-4),
-          price: '189.00 EUR',
-          barcodeText: '3760123456789'
+          sku: 'RM-' + testId.slice(-4)
         },
         options: {}
       }
