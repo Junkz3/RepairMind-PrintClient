@@ -77,13 +77,13 @@ class PrintClientCore extends EventEmitter {
         url: this.config.websocketUrl,
         tenantId: this.config.tenantId,
         clientId: this.config.clientId,
-        apiKey: this.config.apiKey
+        apiKey: this.config.apiKey,
+        token: this.config.token
       });
 
       this.setupSocketListeners();
 
       await this.socket.connect();
-      await this.socket.authenticate();
 
       this.connected = true;
       this.emit('connected');

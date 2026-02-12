@@ -21,8 +21,6 @@ const updateSection = document.getElementById('update-section');
 const downloadUpdateBtn = document.getElementById('download-update');
 const installUpdateBtn = document.getElementById('install-update');
 const toastContainer = document.getElementById('toast-container');
-const settingsPanel = document.getElementById('settings-panel');
-const settingsOverlay = document.getElementById('settings-overlay');
 const queueIndicator = document.getElementById('queue-indicator');
 const queueCountEl = document.getElementById('queue-count');
 
@@ -155,7 +153,6 @@ async function init() {
 
     // Get config
     config = await window.electronAPI.getConfig();
-    populateConfigForm(config);
 
     // Setup event listeners
     setupEventListeners();
@@ -177,29 +174,6 @@ function setupWindowControls() {
     document.getElementById('btn-close').addEventListener('click', () => {
         window.electronAPI.windowClose();
     });
-
-    // Settings panel
-    document.getElementById('btn-settings').addEventListener('click', () => {
-        openSettings();
-    });
-
-    document.getElementById('btn-close-settings').addEventListener('click', () => {
-        closeSettings();
-    });
-
-    settingsOverlay.addEventListener('click', () => {
-        closeSettings();
-    });
-}
-
-function openSettings() {
-    settingsPanel.classList.add('open');
-    settingsOverlay.classList.add('open');
-}
-
-function closeSettings() {
-    settingsPanel.classList.remove('open');
-    settingsOverlay.classList.remove('open');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -257,12 +231,6 @@ function setupEventListeners() {
     // Update downloaded
     window.electronAPI.onUpdateDownloaded((info) => {
         showInstallButton(info);
-    });
-
-    // Form submission
-    configForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await saveConfig();
     });
 
     // Refresh printers
@@ -483,36 +451,6 @@ function updateQueueIndicator(stats) {
         queueCountEl.textContent = pending;
     } else {
         queueIndicator.style.display = 'none';
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CONFIG
-// ═══════════════════════════════════════════════════════════════
-
-function populateConfigForm(cfg) {
-    document.getElementById('backend-url').value = cfg.backendUrl || '';
-    document.getElementById('websocket-url').value = cfg.websocketUrl || '';
-    document.getElementById('tenant-id').value = cfg.tenantId || '';
-    document.getElementById('client-id').value = cfg.clientId || '';
-    document.getElementById('api-key').value = cfg.apiKey || '';
-}
-
-async function saveConfig() {
-    const newConfig = {
-        backendUrl: document.getElementById('backend-url').value,
-        websocketUrl: document.getElementById('websocket-url').value,
-        tenantId: document.getElementById('tenant-id').value,
-        clientId: document.getElementById('client-id').value,
-        apiKey: document.getElementById('api-key').value
-    };
-
-    const result = await window.electronAPI.updateConfig(newConfig);
-
-    if (result.success) {
-        showToast('Configuration saved and client restarted', 'success');
-    } else {
-        showToast(result.error, 'error');
     }
 }
 
