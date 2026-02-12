@@ -131,11 +131,9 @@ class SocketClient extends EventEmitter {
    */
   async authenticate() {
     return new Promise((resolve, reject) => {
+      // JWT auth is handled in handshake middleware, only clientId needed here
       this.socket.emit('authenticate', {
-        tenantId: this.tenantId,
-        clientId: this.clientId,
-        token: this.token,
-        apiKey: this.apiKey
+        clientId: this.clientId
       });
 
       const cleanup = () => {
