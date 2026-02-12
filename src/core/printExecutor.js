@@ -32,7 +32,7 @@ class PrintExecutor {
    * Execute a print job
    * @param {Object} job - Print job object
    * @param {Object} printerInfo - Printer information
-   * @returns {Promise<void>}
+   * @returns {Promise<{osJobId: number|null}>} OS spooler job ID if available
    */
   async executePrintJob(job, printerInfo) {
     switch (job.documentType) {
@@ -297,6 +297,7 @@ class PrintExecutor {
    * Send a file to a system printer (platform-aware)
    * @param {string} filePath - Path to file to print
    * @param {string} printerName - System printer name
+   * @returns {Promise<{osJobId: number|null}>} OS spooler job ID if available
    */
   sendFileToPrinter(filePath, printerName) {
     const cleanupLater = () => {
@@ -311,19 +312,63 @@ class PrintExecutor {
     try {
       const { BrowserWindow } = require('electron');
       return this.printFileElectron(filePath, printerName, BrowserWindow)
-        .then(() => { cleanupLater(); });
+        .then(() => { cleanupLater(); return { osJobId: null }; }); // Electron doesn't expose OS job ID
     } catch (_) {
       // Electron not available (CLI mode) — use system commands
     }
 
     if (process.platform === 'win32') {
-      // Fallback: use Windows lpr command (available when Print Services are enabled)
-      return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); });
+      return this.printFileWithTracking(filePath, printerName).then((result) => { cleanupLater(); return result; });
     } else if (process.platform === 'darwin') {
-      return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); });
+      return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); return { osJobId: null }; });
     } else {
-      return this.printFileUnix(filePath, printerName, 'lp').then(() => { cleanupLater(); });
+      // Linux: lp returns job ID in output
+      return this.printFileLinux(filePath, printerName).then((result) => { cleanupLater(); return result; });
     }
+  }
+
+  /**
+   * Print file on Windows using node-printer's printDirect (returns OS job ID)
+   * @param {string} filePath - Path to PDF file
+   * @param {string} printerName - Printer name
+   * @returns {Promise<{osJobId: number|null}>}
+   */
+  printFileWithTracking(filePath, printerName) {
+    return new Promise((resolve, reject) => {
+      try {
+        const data = fs.readFileSync(filePath);
+        printer.printDirect({
+          data,
+          printer: printerName,
+          type: 'PDF',
+          success: (jobId) => resolve({ osJobId: jobId ? parseInt(jobId, 10) : null }),
+          error: (err) => reject(new Error(`Print failed: ${err.message || err}`))
+        });
+      } catch (error) {
+        reject(new Error(`Print failed: ${error.message}`));
+      }
+    });
+  }
+
+  /**
+   * Print file on Linux using lp (parses job ID from output)
+   * @param {string} filePath - Path to file
+   * @param {string} printerName - Printer name
+   * @returns {Promise<{osJobId: number|null}>}
+   */
+  printFileLinux(filePath, printerName) {
+    return new Promise((resolve, reject) => {
+      execFile('lp', ['-d', printerName, filePath], { timeout: 30000 }, (error, stdout) => {
+        if (error) {
+          reject(new Error(`Print failed: ${error.message}`));
+        } else {
+          // lp output: "request id is MyPrinter-123 (1 file(s))"
+          const match = stdout.match(/request id is \S+-(\d+)/);
+          const osJobId = match ? parseInt(match[1], 10) : null;
+          resolve({ osJobId });
+        }
+      });
+    });
   }
 
   /**
@@ -596,7 +641,7 @@ class PrintExecutor {
           data: typeof data === 'string' ? Buffer.from(data) : data,
           printer: printerName,
           type: doctype,
-          success: () => resolve(),
+          success: (jobId) => resolve({ osJobId: jobId ? parseInt(jobId, 10) : null }),
           error: (err) => reject(new Error(`Raw print failed: ${err.message}`))
         });
       } catch (error) {

@@ -11,6 +11,7 @@ const SocketClient = require('./socketClient');
 const PrintExecutor = require('./printExecutor');
 const JobQueue = require('./jobQueue');
 const ConfigManager = require('./ConfigManager');
+const SpoolerMonitor = require('./spoolerMonitor');
 
 class PrintClientCore extends EventEmitter {
   constructor(config = {}) {
@@ -35,6 +36,7 @@ class PrintClientCore extends EventEmitter {
 
     this.detector = new PrinterDetector();
     this.executor = new PrintExecutor();
+    this.spoolerMonitor = new SpoolerMonitor({ logger: this });
     this.socket = null;
     this.detectedPrinters = [];
     this.registeredPrinters = new Map();
@@ -124,18 +126,35 @@ class PrintClientCore extends EventEmitter {
         throw new Error(`Printer not found: ${job.printerSystemName}`);
       }
 
-      // Update backend status (skip if not connected — test mode)
+      // Update backend: job sent to printer
       if (this.socket && this.connected) {
-        await this.socket.updateJobStatus(job.id, 'in_progress');
+        await this.socket.updateJobStatus(job.id, 'sent');
       }
 
-      // Execute print
-      await this.executor.executePrintJob(job, printer);
+      // Execute print — returns OS spooler job ID
+      const result = await this.executor.executePrintJob(job, printer);
+      const osJobId = result?.osJobId || null;
 
-      // Update backend status
-      if (this.socket && this.connected) {
-        await this.socket.updateJobStatus(job.id, 'completed');
-      }
+      // Monitor spooler for real status (paper jam, completed, etc.)
+      await new Promise((resolve) => {
+        this.spoolerMonitor.monitor(printer.systemName, osJobId, (status, details) => {
+          if (this.socket && this.connected) {
+            if (status === 'completed') {
+              this.socket.updateJobStatus(job.id, 'completed', details).catch(() => {});
+              resolve();
+            } else if (status === 'failed') {
+              this.socket.updateJobStatus(job.id, 'failed', details).catch(() => {});
+              resolve();
+            } else if (status === 'printing' && details?.hasError) {
+              // Temporary error (paper jam, etc.) — report but keep monitoring
+              this.emit('warning', `Job #${job.id}: ${details.message}`);
+            }
+          } else {
+            // Not connected — resolve immediately
+            resolve();
+          }
+        });
+      });
     });
 
     // Relay queue events
@@ -175,6 +194,10 @@ class PrintClientCore extends EventEmitter {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
+    }
+
+    if (this.spoolerMonitor) {
+      this.spoolerMonitor.destroy();
     }
 
     if (this.jobQueue) {
