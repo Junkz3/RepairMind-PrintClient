@@ -68,7 +68,14 @@ const translations = {
       failed: 'Failed ({{retries}}/{{maxRetries}})',
       retrying: 'Retrying ({{retries}}/{{maxRetries}})',
       queued: 'Queued',
-      processing: 'Printing...'
+      processing: 'Printing...',
+      invoice: 'Invoice',
+      receipt: 'Receipt',
+      ticket: 'Repair Ticket',
+      label: 'Label',
+      quote: 'Quote',
+      report: 'Report',
+      delivery_note: 'Delivery Note'
     },
     status: {
       connected: 'Connected',
@@ -164,7 +171,14 @@ const translations = {
       failed: 'Échoué ({{retries}}/{{maxRetries}})',
       retrying: 'Nouvelle tentative ({{retries}}/{{maxRetries}})',
       queued: 'En attente',
-      processing: 'Impression...'
+      processing: 'Impression...',
+      invoice: 'Facture',
+      receipt: 'Reçu',
+      ticket: 'Bon de réparation',
+      label: 'Étiquette',
+      quote: 'Devis',
+      report: 'Rapport',
+      delivery_note: 'Bon de livraison'
     },
     status: {
       connected: 'Connecté',

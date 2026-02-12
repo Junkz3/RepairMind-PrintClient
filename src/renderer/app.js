@@ -527,6 +527,15 @@ function getStatusBadge(job) {
     return t(`jobs.${job.status}`) || job.status;
 }
 
+function getJobLabel(job) {
+    const c = job.content || {};
+    const docNumber = c.invoiceNumber || c.quoteNumber || c.ticketNumber || c.receiptNumber || c.orderNumber || c.deliveryNumber;
+    if (docNumber) return docNumber;
+    if (c.title) return c.title;
+    if (job.documentType) return t(`jobs.${job.documentType}`, job.documentType);
+    return `Job #${job.id}`;
+}
+
 function renderJobs() {
     if (recentJobs.length === 0) {
         jobsList.innerHTML = `
@@ -543,7 +552,7 @@ function renderJobs() {
     jobsList.innerHTML = recentJobs.map(job => `
         <div class="job-item fade-in">
             <div class="job-info">
-                <div class="job-id">Job #${job.id}</div>
+                <div class="job-id">${getJobLabel(job)}</div>
                 <div class="job-printer">${job.printerSystemName || t('jobs.unknownPrinter')}${job.error ? ` — ${job.error}` : ''}</div>
             </div>
             <span class="job-status ${job.status}">${getStatusBadge(job)}</span>
