@@ -83,7 +83,8 @@ class SocketClient extends EventEmitter {
         this.socket = io(`${this.url}/print`, {
           transports: ['websocket'],
           reconnection: false, // We handle reconnection ourselves
-          timeout: 10000
+          timeout: 10000,
+          auth: { token: this.token } // JWT in handshake for server-side middleware
         });
 
         this.socket.on('connect', async () => {
@@ -276,7 +277,8 @@ class SocketClient extends EventEmitter {
       this.socket = io(`${this.url}/print`, {
         transports: ['websocket'],
         reconnection: false,
-        timeout: 10000
+        timeout: 10000,
+        auth: { token: this.token } // JWT in handshake for server-side middleware
       });
 
       await new Promise((resolve, reject) => {
