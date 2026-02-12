@@ -7,8 +7,8 @@
 const ENVIRONMENTS = {
   development: {
     name: 'Development',
-    backendUrl: 'https://dev.repairmind.fr',
-    websocketUrl: 'wss://dev.repairmind.fr',
+    backendUrl: 'https://ws-dev.repairmind.fr',
+    websocketUrl: 'wss://ws-dev.repairmind.fr',
     apiVersion: 'v1'
   },
   production: {
