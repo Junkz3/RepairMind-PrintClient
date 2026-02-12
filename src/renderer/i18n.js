@@ -34,6 +34,9 @@ const translations = {
       title: 'Printers',
       noPrinters: 'No printers detected',
       default: 'Default',
+      primary: 'Primary',
+      setPrimary: 'Set as primary',
+      unsetPrimary: 'Remove primary',
       online: 'Online',
       offline: 'Offline',
       test: 'Test',
@@ -73,7 +76,10 @@ const translations = {
       logoutSuccess: 'Logged out',
       refreshFailed: 'Failed to refresh printers',
       jobFailed: 'Job #{{id}} failed after {{retries}} retries: {{error}}',
-      jobRetrying: 'Job #{{id}} retrying ({{retries}}/{{maxRetries}})...'
+      jobRetrying: 'Job #{{id}} retrying ({{retries}}/{{maxRetries}})...',
+      primarySet: '{{printer}} set as primary',
+      primaryUnset: '{{printer}} is no longer primary',
+      primaryFailed: 'Failed to set primary: {{error}}'
     },
     actions: {
       logoutConfirm: 'Are you sure you want to log out?'
@@ -116,6 +122,9 @@ const translations = {
       title: 'Imprimantes',
       noPrinters: 'Aucune imprimante détectée',
       default: 'Par défaut',
+      primary: 'Principale',
+      setPrimary: 'Définir comme principale',
+      unsetPrimary: 'Retirer principale',
       online: 'En ligne',
       offline: 'Hors ligne',
       test: 'Test',
@@ -155,7 +164,10 @@ const translations = {
       logoutSuccess: 'Déconnexion réussie',
       refreshFailed: 'Échec du rafraîchissement des imprimantes',
       jobFailed: 'Job #{{id}} échoué après {{retries}} tentatives : {{error}}',
-      jobRetrying: 'Job #{{id}} nouvelle tentative ({{retries}}/{{maxRetries}})...'
+      jobRetrying: 'Job #{{id}} nouvelle tentative ({{retries}}/{{maxRetries}})...',
+      primarySet: '{{printer}} définie comme principale',
+      primaryUnset: '{{printer}} n\'est plus principale',
+      primaryFailed: 'Échec : {{error}}'
     },
     actions: {
       logoutConfirm: 'Êtes-vous sûr de vouloir vous déconnecter ?'

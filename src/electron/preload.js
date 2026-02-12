@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Printers
   refreshPrinters: () => ipcRenderer.invoke('refresh-printers'),
   testPrint: (printerSystemName, type) => ipcRenderer.invoke('test-print', { printerSystemName, type }),
+  setPrimaryPrinter: (printerId, isPrimary) => ipcRenderer.invoke('set-primary-printer', { printerId, isPrimary }),
 
   // Configuration
   getConfig: () => ipcRenderer.invoke('get-config'),
@@ -50,6 +51,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Event listeners — printers
   onPrintersUpdate: (callback) => {
     ipcRenderer.on('printers-update', (event, data) => callback(data));
+  },
+  onPrinterPrimaryChanged: (callback) => {
+    ipcRenderer.on('printer-primary-changed', (event, data) => callback(data));
   },
 
   // Event listeners — jobs

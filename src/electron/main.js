@@ -318,6 +318,11 @@ async function initializePrintClient() {
       sendToRenderer('printers-update', printers);
     });
 
+    printClient.on('printer-primary-changed', (printer) => {
+      log.info('Printer primary changed', { printerId: printer.id, isPrimary: printer.isPrimary });
+      sendToRenderer('printer-primary-changed', printer);
+    });
+
     // Job events
     printClient.on('job-completed', (entry) => {
       log.info('Print job completed', { jobId: entry.id });
@@ -494,6 +499,23 @@ ipcMain.handle('test-print', async (event, { printerSystemName, type }) => {
     return { success: true, jobId: job.id };
   } catch (error) {
     log.error('Test print failed', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-primary-printer', async (event, { printerId, isPrimary }) => {
+  if (!printClient) {
+    return { success: false, error: 'Print client not initialized' };
+  }
+  if (!printClient.isConnected()) {
+    return { success: false, error: 'Not connected to backend' };
+  }
+  try {
+    const printer = await printClient.setPrimaryPrinter(printerId, isPrimary);
+    log.info('Primary printer updated', { printerId, isPrimary });
+    return { success: true, printer };
+  } catch (error) {
+    log.error('Set primary printer failed', error);
     return { success: false, error: error.message };
   }
 });

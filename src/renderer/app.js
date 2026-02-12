@@ -232,6 +232,21 @@ function setupEventListeners() {
         renderPrinters();
     });
 
+    // Printer primary changed (from another client or server)
+    window.electronAPI.onPrinterPrimaryChanged((updatedPrinter) => {
+        const printer = printers.find(p => p.id === updatedPrinter.id);
+        if (printer) {
+            // If setting as primary, unset others of same type
+            if (updatedPrinter.isPrimary) {
+                printers.forEach(p => {
+                    if (p.type === printer.type) p.isPrimary = false;
+                });
+            }
+            printer.isPrimary = updatedPrinter.isPrimary;
+            renderPrinters();
+        }
+    });
+
     // Job completed
     window.electronAPI.onJobCompleted((entry) => {
         addRecentJob(entry.job || entry, 'completed', entry);
@@ -344,12 +359,21 @@ function renderPrinters() {
 
     printersList.innerHTML = printers.map(printer => {
         const isDefault = printer.metadata?.isDefault;
+        const isPrimary = printer.isPrimary || false;
+        const hasDbId = !!printer.id;
         const typeLabel = t(`printerTypes.${printer.type}`);
         const interfaceLabel = (printer.interface || 'unknown').toUpperCase();
+        const primaryTitle = isPrimary ? t('printers.unsetPrimary') : t('printers.setPrimary');
 
         return `
-            <div class="printer-card fade-in type-${printer.type}${isDefault ? ' is-default' : ''}">
-                ${isDefault ? `<span class="default-badge">${t('printers.default')}</span>` : ''}
+            <div class="printer-card fade-in type-${printer.type}${isDefault ? ' is-default' : ''}${isPrimary ? ' is-primary' : ''}">
+                ${isPrimary ? `<span class="primary-badge">${t('printers.primary')}</span>` : ''}
+                ${!isPrimary && isDefault ? `<span class="default-badge">${t('printers.default')}</span>` : ''}
+                ${hasDbId ? `<button class="btn-star${isPrimary ? ' active' : ''}" data-printer-id="${printer.id}" data-is-primary="${isPrimary}" title="${primaryTitle}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="${isPrimary ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                </button>` : ''}
                 <div class="printer-icon-large">
                     ${getPrinterIcon(printer.type)}
                 </div>
@@ -404,6 +428,42 @@ function renderPrinters() {
             } else {
                 showToast(t('toast.testFailed', { error: result.error }), 'error');
             }
+        });
+    });
+
+    // Bind star (primary) buttons
+    document.querySelectorAll('.btn-star').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const printerId = parseInt(btn.dataset.printerId);
+            const currentlyPrimary = btn.dataset.isPrimary === 'true';
+            const newPrimary = !currentlyPrimary;
+
+            btn.disabled = true;
+            try {
+                const result = await window.electronAPI.setPrimaryPrinter(printerId, newPrimary);
+                if (result.success) {
+                    // Update local state
+                    const printer = printers.find(p => p.id === printerId);
+                    if (printer) {
+                        // If setting as primary, unset others of same type
+                        if (newPrimary) {
+                            printers.forEach(p => {
+                                if (p.type === printer.type) p.isPrimary = false;
+                            });
+                        }
+                        printer.isPrimary = newPrimary;
+                    }
+                    renderPrinters();
+                    const displayName = printer?.displayName || `#${printerId}`;
+                    showToast(t(newPrimary ? 'toast.primarySet' : 'toast.primaryUnset', { printer: displayName }), 'success');
+                } else {
+                    showToast(t('toast.primaryFailed', { error: result.error }), 'error');
+                }
+            } catch (error) {
+                showToast(t('toast.primaryFailed', { error: error.message }), 'error');
+            }
+            btn.disabled = false;
         });
     });
 }

@@ -220,6 +220,11 @@ class SocketClient extends EventEmitter {
       this.emit('pending_jobs', data);
     });
 
+    // Primary printer updated
+    this.socket.on('primary_printer_updated', (data) => {
+      this.emit('primary_printer_updated', data);
+    });
+
     // Error
     this.socket.on('error', (error) => {
       this.emit('error', error);
@@ -385,6 +390,16 @@ class SocketClient extends EventEmitter {
    */
   async updatePrinterStatus(printerId, status, metadata = {}) {
     return this._emitWithTimeout('printer_status', { printerId, status, metadata }, 'status_updated', 5000);
+  }
+
+  /**
+   * Set printer as primary
+   * @param {number} printerId - Printer DB ID
+   * @param {boolean} isPrimary - Whether to set or unset as primary
+   * @returns {Promise<Object>}
+   */
+  async setPrimaryPrinter(printerId, isPrimary) {
+    return this._emitWithTimeout('set_primary_printer', { printerId, isPrimary }, 'primary_printer_updated', 5000);
   }
 
   /**

@@ -512,6 +512,64 @@ main::-webkit-scrollbar-thumb:hover {
     border-radius: var(--radius-sm);
 }
 
+.printer-card.is-primary {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.04);
+}
+
+.printer-card .primary-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--warning);
+    background: rgba(245, 158, 11, 0.12);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+}
+
+.printer-card .btn-star {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition);
+    opacity: 0;
+}
+
+.printer-card:hover .btn-star,
+.printer-card .btn-star.active {
+    opacity: 1;
+}
+
+.printer-card .btn-star:hover {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+}
+
+.printer-card .btn-star.active {
+    color: var(--warning);
+    background: rgba(245, 158, 11, 0.15);
+}
+
+.printer-card .btn-star:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .printer-icon-large {
     width: 48px;
     height: 48px;

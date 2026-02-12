@@ -130,13 +130,21 @@ class PrintClientCore extends EventEmitter {
   async _registerAllPrinters() {
     for (const printer of this.detectedPrinters) {
       try {
-        await this.socket.registerPrinter(printer);
+        const result = await this.socket.registerPrinter(printer);
+        // Merge backend data (id, isPrimary) into detected printer
+        const backendPrinter = result?.printer || result;
+        if (backendPrinter?.id) {
+          printer.id = backendPrinter.id;
+          printer.isPrimary = backendPrinter.isPrimary || false;
+        }
         this.registeredPrinters.set(printer.systemName, printer);
         this.emit('printer-registered', printer);
       } catch (error) {
         this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
       }
     }
+    // Re-emit updated printers with backend IDs
+    this.emit('printers-updated', this.detectedPrinters);
   }
 
   /**
@@ -475,6 +483,22 @@ class PrintClientCore extends EventEmitter {
   }
 
   /**
+   * Set a printer as primary for its type
+   * @param {number} printerId - Printer DB ID
+   * @param {boolean} isPrimary - Whether to set or unset
+   * @returns {Promise<Object>} Updated printer
+   */
+  async setPrimaryPrinter(printerId, isPrimary) {
+    if (!this.socket || !this.connected) {
+      throw new Error('Not connected to backend');
+    }
+
+    const result = await this.socket.setPrimaryPrinter(printerId, isPrimary);
+    this.emit('printer-primary-changed', result.printer);
+    return result.printer;
+  }
+
+  /**
    * Cancel a job
    */
   cancelJob(jobId) {
@@ -559,22 +583,31 @@ class PrintClientCore extends EventEmitter {
    */
   async refreshPrinters() {
     this.detectedPrinters = await this.detector.detectPrinters();
-    this.emit('printers-updated', this.detectedPrinters);
 
     if (this.connected && this.socket) {
       for (const printer of this.detectedPrinters) {
-        if (!this.registeredPrinters.has(printer.systemName)) {
-          try {
-            await this.socket.registerPrinter(printer);
-            this.registeredPrinters.set(printer.systemName, printer);
-            this.emit('printer-registered', printer);
-          } catch (error) {
-            this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
+        try {
+          const result = await this.socket.registerPrinter(printer);
+          const backendPrinter = result?.printer || result;
+          if (backendPrinter?.id) {
+            printer.id = backendPrinter.id;
+            printer.isPrimary = backendPrinter.isPrimary || false;
           }
+          this.registeredPrinters.set(printer.systemName, printer);
+          this.emit('printer-registered', printer);
+        } catch (error) {
+          // Preserve existing registration data
+          const existing = this.registeredPrinters.get(printer.systemName);
+          if (existing?.id) {
+            printer.id = existing.id;
+            printer.isPrimary = existing.isPrimary || false;
+          }
+          this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
         }
       }
     }
 
+    this.emit('printers-updated', this.detectedPrinters);
     return this.detectedPrinters;
   }
 }
