@@ -44,8 +44,8 @@ class PrinterDetector {
       interface: interfaceType,
       driver: systemPrinter.driver || 'Generic',
       capabilities: {
-        color: this.supportsColor(systemPrinter),
-        duplex: this.supportsDuplex(systemPrinter),
+        color: this.supportsColor(systemPrinter, type),
+        duplex: this.supportsDuplex(systemPrinter, type),
         paperSizes: this.getSupportedPaperSizes(systemPrinter),
         maxWidth: this.getMaxWidth(type),
         cutter: type === 'thermal' || type === 'label',
@@ -67,61 +67,127 @@ class PrinterDetector {
    * @returns {string} Printer type
    */
   detectPrinterType(printer) {
-    const name = (printer.name + ' ' + (printer.displayName || '')).toLowerCase();
+    const name = (printer.name + ' ' + (printer.displayName || '') + ' ' + (printer.driver || '')).toLowerCase();
 
-    // Thermal printers
-    if (
-      name.includes('thermal') ||
-      name.includes('receipt') ||
-      name.includes('pos') ||
-      name.includes('epson tm') ||
-      name.includes('star tsp') ||
-      name.includes('bixolon') ||
-      name.includes('citizen ct')
-    ) {
+    // Thermal / POS receipt printers
+    const thermalKeywords = [
+      'thermal', 'receipt', 'pos ',
+      // Epson POS
+      'epson tm', 'tm-t', 'tm-m', 'tm-l', 'tm-u', 'tm-p', 'tm-h',
+      // Star Micronics
+      'star tsp', 'star sm', 'star mc', 'star mp', 'tsp100', 'tsp650', 'tsp700', 'tsp800',
+      'mcp31', 'mc-print',
+      // Bixolon
+      'bixolon', 'srp-', 'spp-', 'spb-',
+      // Citizen
+      'citizen ct', 'citizen cl', 'ct-s', 'ct-e', 'cl-s',
+      // Custom (Italian POS brand)
+      'custom kube', 'custom plus', 'custom q',
+      // Sewoo / Lukhan
+      'sewoo', 'slk-t',
+      // Rongta
+      'rongta', 'rp328', 'rp80',
+      // Xprinter
+      'xprinter', 'xp-', 'xp58', 'xp80',
+      // Munbyn
+      'munbyn',
+      // HOIN
+      'hoin',
+      // SNBC
+      'snbc', 'btp-',
+      // Sam4s
+      'sam4s', 'ellix',
+      // Metapace
+      'metapace t-',
+      // Posiflex / Aures
+      'posiflex pp', 'aures odp'
+    ];
+    if (thermalKeywords.some(k => name.includes(k))) {
       return 'thermal';
     }
 
-    // Label printers
-    if (
-      name.includes('label') ||
-      name.includes('dymo') ||
-      name.includes('brother ql') ||
-      name.includes('zebra') ||
-      name.includes('godex')
-    ) {
+    // Label / barcode printers
+    const labelKeywords = [
+      'label', 'barcode', 'étiquette',
+      // Dymo
+      'dymo', 'labelwriter', 'labelmanager',
+      // Brother label
+      'brother ql', 'brother pt', 'brother td', 'ql-', 'pt-p',
+      // Zebra
+      'zebra', 'zd', 'zt', 'gk4', 'gx4', 'zq', 'tlp', 'lp28',
+      // TSC
+      'tsc ', 'ttp-', 'tdp-', 'te200', 'te300',
+      // Godex
+      'godex', 'g500', 'ez',
+      // SATO
+      'sato', 'cl4nx', 'ct4-lx',
+      // Cab
+      'cab eos', 'cab mach', 'cab squix',
+      // Honeywell / Intermec
+      'honeywell pc', 'intermec', 'pm43', 'pm23', 'pc43',
+      // Argox
+      'argox', 'os-2',
+      // Niimbot
+      'niimbot', 'b21', 'b1', 'd11'
+    ];
+    if (labelKeywords.some(k => name.includes(k))) {
       return 'label';
     }
 
-    // Laser printers
-    if (
-      name.includes('laserjet') ||
-      name.includes('laser') ||
-      name.includes('hp lj') ||
-      name.includes('brother hl') ||
-      name.includes('samsung ml')
-    ) {
+    // Laser printers (check before inkjet — some MFPs match both)
+    const laserKeywords = [
+      'laserjet', 'laser',
+      // HP
+      'hp lj', 'hp color lj', 'hp mfp',
+      // Brother laser
+      'brother hl', 'brother mfc', 'brother dcp', 'hl-l', 'mfc-l', 'dcp-l',
+      // Samsung / HP (ex-Samsung)
+      'samsung ml', 'samsung clx', 'samsung sl', 'samsung xpress',
+      // Canon laser
+      'canon lbp', 'imageclass', 'i-sensys', 'imagerunner',
+      // Lexmark
+      'lexmark ms', 'lexmark mx', 'lexmark cs', 'lexmark cx',
+      // Xerox
+      'xerox', 'phaser', 'versalink', 'workcentre', 'altalink',
+      // Kyocera
+      'kyocera', 'ecosys', 'taskalfa',
+      // Ricoh
+      'ricoh sp', 'ricoh mp', 'ricoh im',
+      // Konica Minolta
+      'bizhub', 'konica',
+      // OKI
+      'oki c', 'oki b', 'oki mc', 'oki mb',
+      // Pantum
+      'pantum'
+    ];
+    if (laserKeywords.some(k => name.includes(k))) {
       return 'laser';
     }
 
     // Dot matrix printers
-    if (
-      name.includes('dot matrix') ||
-      name.includes('epson lq') ||
-      name.includes('fx-') ||
-      name.includes('dfx-')
-    ) {
+    const dotmatrixKeywords = [
+      'dot matrix', 'dotmatrix', 'impact',
+      'epson lq', 'epson lx', 'epson fx', 'fx-', 'dfx-', 'lq-', 'lx-',
+      'oki ml', 'oki microline',
+      'printronix'
+    ];
+    if (dotmatrixKeywords.some(k => name.includes(k))) {
       return 'dotmatrix';
     }
 
-    // Inkjet printers (default for consumer printers)
-    if (
-      name.includes('deskjet') ||
-      name.includes('officejet') ||
-      name.includes('pixma') ||
-      name.includes('stylus') ||
-      name.includes('expression')
-    ) {
+    // Inkjet printers
+    const inkjetKeywords = [
+      'inkjet', 'ink jet',
+      // HP
+      'deskjet', 'officejet', 'envy', 'smart tank', 'hp ink',
+      // Canon
+      'pixma', 'maxify', 'megatank', 'selphy',
+      // Epson inkjet
+      'stylus', 'expression', 'workforce', 'ecotank', 'et-',
+      // Brother inkjet
+      'brother mfc-j', 'brother dcp-j', 'mfc-j', 'dcp-j'
+    ];
+    if (inkjetKeywords.some(k => name.includes(k))) {
       return 'inkjet';
     }
 
@@ -151,42 +217,42 @@ class PrinterDetector {
    * @param {Object} printer - System printer object
    * @returns {boolean}
    */
-  supportsColor(printer) {
-    const name = (printer.name + ' ' + (printer.displayName || '')).toLowerCase();
-
-    // Thermal and dot matrix printers are monochrome
-    if (name.includes('thermal') || name.includes('dot matrix')) {
+  supportsColor(printer, type) {
+    // Thermal, label, and dot matrix are always monochrome
+    if (type === 'thermal' || type === 'dotmatrix' || type === 'label') {
       return false;
     }
 
-    // Check for color keywords
-    if (name.includes('color') || name.includes('colour')) {
+    const name = (printer.name + ' ' + (printer.displayName || '')).toLowerCase();
+    if (name.includes('color') || name.includes('colour') || name.includes('clx') || name.includes('cs-') || name.includes('oki c')) {
       return true;
     }
 
-    // Default: assume no color (conservative)
+    // Inkjet printers are typically color
+    if (type === 'inkjet') {
+      return true;
+    }
+
     return false;
   }
 
   /**
    * Check if printer supports duplex (two-sided printing)
    * @param {Object} printer - System printer object
+   * @param {string} type - Detected printer type
    * @returns {boolean}
    */
-  supportsDuplex(printer) {
-    const name = (printer.name + ' ' + (printer.displayName || '')).toLowerCase();
-
+  supportsDuplex(printer, type) {
     // Thermal, label, and dot matrix don't support duplex
-    if (name.includes('thermal') || name.includes('label') || name.includes('dot matrix')) {
+    if (type === 'thermal' || type === 'label' || type === 'dotmatrix') {
       return false;
     }
 
-    // Check for duplex keywords
-    if (name.includes('duplex') || name.includes('double') || name.includes('mfp')) {
+    const name = (printer.name + ' ' + (printer.displayName || '')).toLowerCase();
+    if (name.includes('duplex') || name.includes('double') || name.includes('mfp') || name.includes('mfc')) {
       return true;
     }
 
-    // Default: no duplex
     return false;
   }
 

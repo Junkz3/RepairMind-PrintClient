@@ -32,6 +32,41 @@ const loginBtn = document.getElementById('login-btn');
 const appVersionSpan = document.getElementById('app-version');
 
 // ═══════════════════════════════════════════════════════════════
+// i18n — Apply translations to static HTML elements
+// ═══════════════════════════════════════════════════════════════
+
+function applyStaticTranslations() {
+    const map = {
+        'i18n-login-title': 'login.title',
+        'i18n-login-subtitle': 'login.subtitle',
+        'i18n-email-label': 'login.email',
+        'i18n-password-label': 'login.password',
+        'i18n-login-btn': 'login.submit',
+        'i18n-env-dev': 'env.development',
+        'i18n-env-prod': 'env.production',
+        'i18n-header-title': 'header.title',
+        'i18n-header-subtitle': 'header.subtitle',
+        'i18n-printers-title': 'printers.title',
+        'i18n-jobs-title': 'jobs.title',
+        'i18n-queue-label': 'queue.inQueue',
+        'i18n-update-title': 'updates.title'
+    };
+
+    for (const [id, key] of Object.entries(map)) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = t(key);
+    }
+
+    // Placeholders
+    const emailInput = document.getElementById('login-email');
+    if (emailInput) emailInput.placeholder = t('login.emailPlaceholder');
+
+    // Update download/install buttons
+    if (downloadUpdateBtn) downloadUpdateBtn.textContent = t('updates.download');
+    if (installUpdateBtn) installUpdateBtn.textContent = t('updates.install');
+}
+
+// ═══════════════════════════════════════════════════════════════
 // AUTHENTICATION
 // ═══════════════════════════════════════════════════════════════
 
@@ -39,6 +74,11 @@ async function checkAuthentication() {
     const cfg = await window.electronAPI.getConfig();
     config = cfg;
     isAuthenticated = cfg.isAuthenticated || false;
+
+    // Set locale from user preferences (before showing any UI)
+    const lang = cfg.user?.preferences?.language || 'en';
+    setLocale(lang);
+    applyStaticTranslations();
 
     if (!isAuthenticated) {
         showLoginScreen();
@@ -67,14 +107,14 @@ async function handleLogin(event) {
     const environment = document.querySelector('input[name="environment"]:checked').value;
 
     if (!email || !password) {
-        showLoginError('Veuillez remplir tous les champs');
+        showLoginError(t('login.fillAllFields'));
         return;
     }
 
     // Disable button and show loading state
     loginBtn.disabled = true;
     const originalHTML = loginBtn.innerHTML;
-    loginBtn.innerHTML = '<span>Connexion en cours...</span>';
+    loginBtn.innerHTML = `<span>${t('login.connecting')}</span>`;
 
     // Hide previous errors
     loginError.style.display = 'none';
@@ -87,17 +127,17 @@ async function handleLogin(event) {
         const result = await window.electronAPI.login(email, password);
 
         if (result.success) {
-            showToast('Connexion réussie', 'success');
+            showToast(t('toast.loginSuccess'), 'success');
             isAuthenticated = true;
             hideLoginScreen();
 
             // Reinitialize app with new credentials
             await init();
         } else {
-            showLoginError(result.error || 'Échec de la connexion');
+            showLoginError(result.error || t('login.failed'));
         }
     } catch (error) {
-        showLoginError('Erreur de connexion: ' + error.message);
+        showLoginError(t('login.error', { message: error.message }));
     } finally {
         loginBtn.disabled = false;
         loginBtn.innerHTML = originalHTML;
@@ -110,11 +150,11 @@ function showLoginError(message) {
 }
 
 async function handleLogout() {
-    if (confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
+    if (confirm(t('actions.logoutConfirm'))) {
         await window.electronAPI.logout();
         isAuthenticated = false;
         showLoginScreen();
-        showToast('Déconnexion réussie', 'info');
+        showToast(t('toast.logoutSuccess'), 'info');
     }
 }
 
@@ -201,14 +241,14 @@ function setupEventListeners() {
     // Job failed permanently
     window.electronAPI.onJobFailed((entry) => {
         addRecentJob(entry.job, 'failed', entry);
-        showToast(`Job #${entry.id} failed after ${entry.retries} retries: ${entry.error}`, 'error');
+        showToast(t('toast.jobFailed', { id: entry.id, retries: entry.retries, error: entry.error }), 'error');
         refreshQueueStats();
     });
 
     // Job retrying
     window.electronAPI.onJobRetrying((entry) => {
         addRecentJob(entry.job, 'retrying', entry);
-        showToast(`Job #${entry.id} retrying (${entry.retries}/${entry.maxRetries})...`, 'info');
+        showToast(t('toast.jobRetrying', { id: entry.id, retries: entry.retries, maxRetries: entry.maxRetries }), 'info');
         refreshQueueStats();
     });
 
@@ -241,7 +281,7 @@ function setupEventListeners() {
         try {
             await window.electronAPI.refreshPrinters();
         } catch (e) {
-            showToast('Failed to refresh printers', 'error');
+            showToast(t('toast.refreshFailed'), 'error');
         }
 
         refreshPrintersBtn.classList.remove('spinning');
@@ -251,7 +291,7 @@ function setupEventListeners() {
     // Download update
     downloadUpdateBtn.addEventListener('click', async () => {
         downloadUpdateBtn.disabled = true;
-        downloadUpdateBtn.textContent = 'Downloading...';
+        downloadUpdateBtn.textContent = t('updates.downloading');
         await window.electronAPI.downloadUpdate();
     });
 
@@ -269,11 +309,11 @@ function updateStatus(status) {
     if (status.connected) {
         statusDot.classList.remove('offline');
         statusDot.classList.add('online');
-        statusText.textContent = 'Connected';
+        statusText.textContent = t('status.connected');
     } else {
         statusDot.classList.remove('online');
         statusDot.classList.add('offline');
-        statusText.textContent = 'Disconnected';
+        statusText.textContent = t('status.disconnected');
     }
 
     if (status.printers) {
@@ -291,51 +331,58 @@ function renderPrinters() {
 
     if (printers.length === 0) {
         printersList.innerHTML = `
-            <div class="empty-state">
+            <div class="empty-state" style="grid-column: 1 / -1;">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
                     <polyline points="6 9 6 2 18 2 18 9"></polyline>
                     <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
                     <rect x="6" y="14" width="12" height="8"></rect>
                 </svg>
-                <p>No printers detected</p>
+                <p>${t('printers.noPrinters')}</p>
             </div>`;
         return;
     }
 
-    printersList.innerHTML = printers.map(printer => `
-        <div class="printer-item fade-in">
-            <div class="printer-icon">
-                ${getPrinterIcon(printer.type)}
-            </div>
-            <div class="printer-info">
-                <div class="printer-name">${printer.displayName}</div>
-                <div class="printer-type">${printer.type} &middot; ${printer.interface || 'unknown'}</div>
-            </div>
-            <div class="printer-actions">
-                <div class="test-dropdown">
-                    <button class="btn-test" title="Test print">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                        </svg>
-                        Test
-                    </button>
-                    <div class="test-menu">
-                        <button class="test-menu-item" data-printer="${printer.systemName}" data-type="thermal">Thermal Receipt</button>
-                        <button class="test-menu-item" data-printer="${printer.systemName}" data-type="pdf">PDF Invoice</button>
-                        <button class="test-menu-item" data-printer="${printer.systemName}" data-type="label">Label</button>
+    printersList.innerHTML = printers.map(printer => {
+        const isDefault = printer.metadata?.isDefault;
+        const typeLabel = t(`printerTypes.${printer.type}`);
+        const interfaceLabel = (printer.interface || 'unknown').toUpperCase();
+
+        return `
+            <div class="printer-card fade-in type-${printer.type}${isDefault ? ' is-default' : ''}">
+                ${isDefault ? `<span class="default-badge">${t('printers.default')}</span>` : ''}
+                <div class="printer-icon-large">
+                    ${getPrinterIcon(printer.type)}
+                </div>
+                <div class="printer-card-name" title="${printer.displayName}">${printer.displayName}</div>
+                <div class="printer-card-type">${typeLabel}</div>
+                <div class="printer-card-interface">${interfaceLabel}</div>
+                <div class="printer-card-status">
+                    <span class="dot"></span>
+                    ${t('printers.online')}
+                </div>
+                <div class="printer-card-actions">
+                    <div class="test-dropdown">
+                        <button class="btn-test" title="${t('printers.test')}">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                            ${t('printers.test')}
+                        </button>
+                        <div class="test-menu">
+                            <button class="test-menu-item" data-printer="${printer.systemName}" data-type="thermal">${t('printers.testThermal')}</button>
+                            <button class="test-menu-item" data-printer="${printer.systemName}" data-type="pdf">${t('printers.testPdf')}</button>
+                            <button class="test-menu-item" data-printer="${printer.systemName}" data-type="label">${t('printers.testLabel')}</button>
+                        </div>
                     </div>
                 </div>
-                <span class="printer-status online">Online</span>
-            </div>
-        </div>
-    `).join('');
+            </div>`;
+    }).join('');
 
     // Bind test print buttons
     document.querySelectorAll('.btn-test').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const menu = btn.nextElementSibling;
-            // Close all other menus
             document.querySelectorAll('.test-menu.open').forEach(m => {
                 if (m !== menu) m.classList.remove('open');
             });
@@ -349,14 +396,13 @@ function renderPrinters() {
             const printerName = item.dataset.printer;
             const type = item.dataset.type;
 
-            // Close menu
             item.parentElement.classList.remove('open');
 
             const result = await window.electronAPI.testPrint(printerName, type);
             if (result.success) {
-                showToast(`Test ${type} sent to ${printerName}`, 'success');
+                showToast(t('toast.testSent', { type, printer: printerName }), 'success');
             } else {
-                showToast(`Test failed: ${result.error}`, 'error');
+                showToast(t('toast.testFailed', { error: result.error }), 'error');
             }
         });
     });
@@ -368,10 +414,14 @@ document.addEventListener('click', () => {
 });
 
 function getPrinterIcon(type) {
+    const size = 22;
     const icons = {
-        thermal: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 2v4M18 2v4M6 18v4M18 18v4"/></svg>',
-        label: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
-        generic: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>'
+        thermal: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 6V2h12v4"/><path d="M6 18v2h12v-2"/><path d="M10 10h4"/><path d="M10 13h4"/></svg>`,
+        label: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.5" fill="currentColor"/></svg>`,
+        laser: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/><circle cx="18" cy="11" r="1" fill="currentColor"/></svg>`,
+        inkjet: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/><path d="M12 5l-1.5 3a1.5 1.5 0 1 0 3 0L12 5z" fill="currentColor" stroke="none"/></svg>`,
+        dotmatrix: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="1"/><path d="M6 7V4h12v3"/><path d="M6 17v3h12v-3"/><circle cx="8" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="16" cy="12" r="1" fill="currentColor"/></svg>`,
+        generic: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`
     };
     return icons[type] || icons.generic;
 }
@@ -404,14 +454,13 @@ function addRecentJob(job, status, entry = null) {
 }
 
 function getStatusBadge(job) {
-    const statusLabels = {
-        completed: 'Completed',
-        failed: `Failed (${job.retries}/${job.maxRetries})`,
-        retrying: `Retrying (${job.retries}/${job.maxRetries})`,
-        queued: 'Queued',
-        processing: 'Printing...'
-    };
-    return statusLabels[job.status] || job.status;
+    if (job.status === 'failed') {
+        return t('jobs.failed', { retries: job.retries, maxRetries: job.maxRetries });
+    }
+    if (job.status === 'retrying') {
+        return t('jobs.retrying', { retries: job.retries, maxRetries: job.maxRetries });
+    }
+    return t(`jobs.${job.status}`) || job.status;
 }
 
 function renderJobs() {
@@ -422,7 +471,7 @@ function renderJobs() {
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                     <polyline points="14 2 14 8 20 8"></polyline>
                 </svg>
-                <p>No recent jobs</p>
+                <p>${t('jobs.noJobs')}</p>
             </div>`;
         return;
     }
@@ -431,7 +480,7 @@ function renderJobs() {
         <div class="job-item fade-in">
             <div class="job-info">
                 <div class="job-id">Job #${job.id}</div>
-                <div class="job-printer">${job.printerSystemName || 'Unknown printer'}${job.error ? ` — ${job.error}` : ''}</div>
+                <div class="job-printer">${job.printerSystemName || t('jobs.unknownPrinter')}${job.error ? ` — ${job.error}` : ''}</div>
             </div>
             <span class="job-status ${job.status}">${getStatusBadge(job)}</span>
         </div>
@@ -486,13 +535,13 @@ function showToast(message, type = 'info') {
 
 function showUpdateSection(info) {
     updateSection.style.display = 'block';
-    document.getElementById('update-message').textContent = `Version ${info.version} is available`;
+    document.getElementById('update-message').textContent = t('updates.available', { version: info.version });
 }
 
 function showInstallButton(info) {
     downloadUpdateBtn.style.display = 'none';
     installUpdateBtn.style.display = 'inline-flex';
-    document.getElementById('update-message').textContent = `Version ${info.version} downloaded - ready to install`;
+    document.getElementById('update-message').textContent = t('updates.downloaded', { version: info.version });
 }
 
 // ═══════════════════════════════════════════════════════════════

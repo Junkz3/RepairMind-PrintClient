@@ -460,99 +460,156 @@ main::-webkit-scrollbar-thumb:hover {
     to { transform: rotate(360deg); }
 }
 
-/* ── Printer Items ──────────────────────────────────────────── */
+/* ── Printer Items (Card Grid) ─────────────────────────────── */
 
-.printers-list, .jobs-list {
+.printers-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
     min-height: 60px;
 }
 
-.printer-item {
+.jobs-list {
+    min-height: 60px;
+}
+
+.printer-card {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 12px;
+    padding: 16px 12px 12px;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    margin-bottom: 8px;
-    transition: background var(--transition);
+    border-radius: var(--radius-lg);
+    transition: all var(--transition);
+    position: relative;
+    cursor: default;
 }
 
-.printer-item:hover {
+.printer-card:hover {
     background: var(--bg-hover);
+    border-color: rgba(102, 126, 234, 0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
-.printer-icon {
-    width: 36px;
-    height: 36px;
+.printer-card.is-default {
+    border-color: rgba(102, 126, 234, 0.4);
+    background: rgba(102, 126, 234, 0.04);
+}
+
+.printer-card .default-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    background: rgba(102, 126, 234, 0.12);
+    padding: 2px 6px;
     border-radius: var(--radius-sm);
+}
+
+.printer-icon-large {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--accent);
-    flex-shrink: 0;
+    margin-bottom: 10px;
 }
 
-.printer-info {
-    flex: 1;
-    min-width: 0;
+.printer-card.type-thermal .printer-icon-large {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(234, 88, 12, 0.15));
+    color: var(--warning);
 }
 
-.printer-name {
-    font-weight: 500;
-    font-size: 14px;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.printer-type {
-    font-size: 12px;
-    color: var(--text-secondary);
-    margin-top: 2px;
-}
-
-.printer-status {
-    padding: 4px 10px;
-    border-radius: var(--radius-pill);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-}
-
-.printer-status.online {
-    background: rgba(16, 185, 129, 0.15);
+.printer-card.type-label .printer-icon-large {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.15));
     color: var(--success);
 }
 
-.printer-status.offline {
-    background: rgba(239, 68, 68, 0.15);
-    color: var(--error);
+.printer-card.type-laser .printer-icon-large {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.15));
+    color: #3b82f6;
 }
 
-/* ── Printer Actions & Test Dropdown ──────────────────────── */
+.printer-card.type-inkjet .printer-icon-large {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(139, 92, 246, 0.15));
+    color: #a855f7;
+}
 
-.printer-actions {
+.printer-card.type-dotmatrix .printer-icon-large {
+    background: linear-gradient(135deg, rgba(107, 114, 128, 0.15), rgba(75, 85, 99, 0.15));
+    color: #6b7280;
+}
+
+.printer-card-name {
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--text-primary);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    margin-bottom: 4px;
+}
+
+.printer-card-type {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: capitalize;
+    margin-bottom: 2px;
+}
+
+.printer-card-interface {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 8px;
+}
+
+.printer-card-status {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-left: auto;
-    flex-shrink: 0;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--success);
+    margin-bottom: 8px;
+}
+
+.printer-card-status .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.printer-card-actions {
+    width: 100%;
 }
 
 .test-dropdown {
     position: relative;
+    width: 100%;
 }
 
 .btn-test {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 4px;
-    padding: 4px 10px;
+    width: 100%;
+    padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: transparent;
@@ -572,9 +629,10 @@ main::-webkit-scrollbar-thumb:hover {
 .test-menu {
     display: none;
     position: absolute;
-    top: 100%;
-    right: 0;
-    margin-top: 4px;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 4px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -721,19 +779,10 @@ footer {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 12px;
+    padding: 8px;
     border-top: 1px solid var(--border);
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-muted);
-}
-
-.separator {
-    opacity: 0.3;
-}
-
-.hint {
-    font-style: italic;
 }
 
 /* ── Toast Notifications ────────────────────────────────────── */

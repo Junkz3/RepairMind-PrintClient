@@ -20,8 +20,8 @@
                     <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
                     <rect x="6" y="14" width="12" height="8"></rect>
                 </svg>
-                <h1>RepairMind Print Client</h1>
-                <p>Connectez-vous avec votre compte RepairMind</p>
+                <h1 id="i18n-login-title">RepairMind Print Client</h1>
+                <p id="i18n-login-subtitle">Sign in with your RepairMind account</p>
             </div>
 
             <!-- Environment Selector -->
@@ -29,14 +29,14 @@
                 <label class="env-option">
                     <input type="radio" name="environment" value="development" id="env-dev" checked>
                     <span class="env-label">
-                        <span class="env-name">Development</span>
+                        <span class="env-name" id="i18n-env-dev">Development</span>
                         <span class="env-url">dev.repairmind.fr</span>
                     </span>
                 </label>
                 <label class="env-option">
                     <input type="radio" name="environment" value="production" id="env-prod">
                     <span class="env-label">
-                        <span class="env-name">Production</span>
+                        <span class="env-name" id="i18n-env-prod">Production</span>
                         <span class="env-url">app.repairmind.fr</span>
                     </span>
                 </label>
@@ -44,17 +44,17 @@
 
             <form id="login-form">
                 <div class="form-group">
-                    <label for="login-email">Email</label>
+                    <label for="login-email" id="i18n-email-label">Email</label>
                     <input
                         type="email"
                         id="login-email"
-                        placeholder="votre.email@entreprise.com"
+                        placeholder="your.email@company.com"
                         required
                         autocomplete="email"
                     />
                 </div>
                 <div class="form-group">
-                    <label for="login-password">Mot de passe</label>
+                    <label for="login-password" id="i18n-password-label">Password</label>
                     <input
                         type="password"
                         id="login-password"
@@ -70,7 +70,7 @@
                         <polyline points="10 17 15 12 10 7"></polyline>
                         <line x1="15" y1="12" x2="3" y2="12"></line>
                     </svg>
-                    <span>Se connecter</span>
+                    <span id="i18n-login-btn">Sign in</span>
                 </button>
             </form>
 
@@ -110,13 +110,13 @@
         <header>
             <div class="header-content">
                 <div class="header-info">
-                    <h1>Print Client</h1>
-                    <p class="header-subtitle">Gestionnaire d'impression RepairMind</p>
+                    <h1 id="i18n-header-title">Print Client</h1>
+                    <p class="header-subtitle" id="i18n-header-subtitle">RepairMind print manager</p>
                 </div>
                 <div class="header-right">
                     <div class="queue-indicator" id="queue-indicator" style="display: none;">
                         <span class="queue-count" id="queue-count">0</span>
-                        <span class="queue-label">in queue</span>
+                        <span class="queue-label" id="i18n-queue-label">in queue</span>
                     </div>
                     <div class="status" id="status">
                         <span class="status-dot offline"></span>
@@ -135,7 +135,7 @@
                         <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
                         <rect x="6" y="14" width="12" height="8"></rect>
                     </svg>
-                    <h2>Printers <span class="badge" id="printer-count">0</span></h2>
+                    <h2><span id="i18n-printers-title">Printers</span> <span class="badge" id="printer-count">0</span></h2>
                     <button class="btn-icon" id="refresh-printers" title="Refresh">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="23 4 23 10 17 10"></polyline>
@@ -165,7 +165,7 @@
                         <line x1="16" y1="13" x2="8" y2="13"></line>
                         <line x1="16" y1="17" x2="8" y2="17"></line>
                     </svg>
-                    <h2>Recent Jobs</h2>
+                    <h2 id="i18n-jobs-title">Recent Jobs</h2>
                 </div>
                 <div id="jobs-list" class="jobs-list">
                     <div class="empty-state">
@@ -186,21 +186,20 @@
                         <polyline points="7 10 12 15 17 10"></polyline>
                         <line x1="12" y1="15" x2="12" y2="3"></line>
                     </svg>
-                    <h2>Update Available</h2>
+                    <h2 id="i18n-update-title">Update Available</h2>
                 </div>
                 <p id="update-message" class="update-msg">A new version is available</p>
-                <button class="btn-primary" id="download-update">Download Update</button>
+                <button class="btn-primary" id="download-update">Download</button>
                 <button class="btn-primary" id="install-update" style="display: none;">Install & Restart</button>
             </section>
         </main>
 
         <footer>
             <span>v<span id="version">1.0.0</span></span>
-            <span class="separator">|</span>
-            <span class="hint">Minimizes to system tray when closed</span>
         </footer>
     </div>
 
+    <script src="i18n.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
