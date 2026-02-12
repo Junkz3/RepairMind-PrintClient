@@ -972,9 +972,13 @@ footer {
     margin-bottom: 32px;
 }
 
-.login-header svg {
-    color: var(--accent);
+.login-logo {
     margin-bottom: 16px;
+}
+
+.header-logo {
+    margin-right: 12px;
+    flex-shrink: 0;
 }
 
 .login-header h1 {

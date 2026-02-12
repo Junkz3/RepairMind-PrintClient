@@ -50,10 +50,10 @@ tmp/
 temp/
 .cache/
 
-# Build resources (keep the directory structure)
-build/*.ico
+# Build resources (keep icons, ignore the rest)
 build/*.icns
-build/*.png
+!build/icon.ico
+!build/icon.png
 !build/README.md
 
 # Archives
