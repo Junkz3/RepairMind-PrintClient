@@ -362,8 +362,11 @@ function renderPrinters() {
         const isPrimary = printer.isPrimary || false;
         const hasDbId = !!printer.id;
         const typeLabel = t(`printerTypes.${printer.type}`);
+        const usageLabel = t(`printerUsage.${printer.type}`);
         const interfaceLabel = (printer.interface || 'unknown').toUpperCase();
-        const primaryTitle = isPrimary ? t('printers.unsetPrimary') : t('printers.setPrimary');
+        const primaryTitle = isPrimary
+            ? t('printers.unsetPrimary')
+            : `${t('printers.setPrimary')} (${usageLabel})`;
 
         return `
             <div class="printer-card fade-in type-${printer.type}${isDefault ? ' is-default' : ''}${isPrimary ? ' is-primary' : ''}">
@@ -379,6 +382,7 @@ function renderPrinters() {
                 </div>
                 <div class="printer-card-name" title="${printer.displayName}">${printer.displayName}</div>
                 <div class="printer-card-type">${typeLabel}</div>
+                <div class="printer-card-usage">${usageLabel}</div>
                 <div class="printer-card-interface">${interfaceLabel}</div>
                 <div class="printer-card-status">
                     <span class="dot"></span>

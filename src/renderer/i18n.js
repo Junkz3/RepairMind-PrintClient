@@ -52,6 +52,14 @@ const translations = {
       dotmatrix: 'Dot Matrix',
       generic: 'Printer'
     },
+    printerUsage: {
+      thermal: 'Receipts, repair tickets',
+      label: 'Labels, barcodes, QR codes',
+      laser: 'Invoices, quotes, reports',
+      inkjet: 'Invoices, quotes, reports',
+      dotmatrix: 'Delivery notes, multi-part forms',
+      generic: 'General documents'
+    },
     jobs: {
       title: 'Recent Jobs',
       noJobs: 'No recent jobs',
@@ -139,6 +147,14 @@ const translations = {
       inkjet: 'Jet d\'encre',
       dotmatrix: 'Matricielle',
       generic: 'Imprimante'
+    },
+    printerUsage: {
+      thermal: 'Tickets, bons de réparation',
+      label: 'Étiquettes, codes-barres, QR',
+      laser: 'Factures, devis, rapports',
+      inkjet: 'Factures, devis, rapports',
+      dotmatrix: 'Bons de livraison, liasses',
+      generic: 'Documents généraux'
     },
     jobs: {
       title: 'Jobs récents',
