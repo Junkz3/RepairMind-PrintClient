@@ -86,15 +86,20 @@
     "repairmind",
     "electron"
   ],
-  "author": "RepairMind",
+  "author": {
+    "name": "RepairMind",
+    "email": "contact@repairmind.fr"
+  },
   "license": "MIT",
   "dependencies": {
     "@thiagoelg/node-printer": "^0.6.2",
     "auto-launch": "^5.0.6",
+    "chalk": "4.1.2",
     "dotenv": "^16.6.1",
     "electron-log": "^5.0.0",
     "electron-updater": "^6.1.0",
     "node-thermal-printer": "^4.4.5",
+    "ora": "5.4.1",
     "pdfkit": "^0.15.0",
     "socket.io-client": "^4.8.1"
   },
