@@ -1,7 +1,12 @@
 /**
- * Print Client Core - EventEmitter version for Electron
+ * Print Client Core v2 - EventEmitter orchestrator
  *
- * Emits events instead of console.log for integration with Electron main process
+ * Key improvements over v1:
+ * - Pending jobs sync on reconnect
+ * - Re-register printers on reconnect
+ * - System metrics tracking (uptime, success rate, throughput)
+ * - Parallel job processing per printer
+ * - Structured event emissions for observability
  */
 
 const EventEmitter = require('events');
@@ -17,10 +22,7 @@ class PrintClientCore extends EventEmitter {
   constructor(config = {}) {
     super();
 
-    // Use ConfigManager for persistent storage
     this.configManager = config.configManager || new ConfigManager();
-
-    // Get environment configuration
     const envConfig = this.configManager.getEnvironmentConfig();
 
     this.config = {
@@ -43,9 +45,21 @@ class PrintClientCore extends EventEmitter {
     this.heartbeatInterval = null;
     this.connected = false;
 
+    // System metrics
+    this.metrics = {
+      startedAt: null,
+      lastConnectedAt: null,
+      lastDisconnectedAt: null,
+      reconnections: 0,
+      jobsReceived: 0,
+      jobsCompleted: 0,
+      jobsFailed: 0,
+      pendingJobsSynced: 0
+    };
+
     // Job queue with persistent storage
     const storePath = config.queueStorePath || path.join(
-      require('os').tmpdir(), 'repairmind-print', 'job-queue.json'
+      require('os').homedir(), '.repairmind-print', 'job-queue.json'
     );
     this.jobQueue = new JobQueue({ storePath });
     this.setupQueueListeners();
@@ -55,9 +69,10 @@ class PrintClientCore extends EventEmitter {
    * Start the print client
    */
   async start() {
+    this.metrics.startedAt = Date.now();
     this.emit('starting');
 
-    // Step 1: Detect printers (always runs, independent of backend)
+    // Step 1: Detect printers
     try {
       this.detectedPrinters = await this.detector.detectPrinters();
       this.emit('printers-updated', this.detectedPrinters);
@@ -70,10 +85,10 @@ class PrintClientCore extends EventEmitter {
       this.emit('warning', 'No printers detected.');
     }
 
-    // Start job queue retry timer (works even without backend)
+    // Start job queue timers (works even without backend)
     this.jobQueue.startRetryTimer();
 
-    // Step 2: Connect to backend (non-blocking — printers show even if offline)
+    // Step 2: Connect to backend
     try {
       this.socket = new SocketClient({
         url: this.config.websocketUrl,
@@ -84,32 +99,74 @@ class PrintClientCore extends EventEmitter {
       });
 
       this.setupSocketListeners();
-
       await this.socket.connect();
 
       this.connected = true;
+      this.metrics.lastConnectedAt = Date.now();
       this.emit('connected');
 
-      // Step 3: Register printers with backend
+      // Step 3: Register printers
       if (this.detectedPrinters.length > 0 && this.config.autoRegister) {
-        for (const printer of this.detectedPrinters) {
-          try {
-            await this.socket.registerPrinter(printer);
-            this.registeredPrinters.set(printer.systemName, printer);
-            this.emit('printer-registered', printer);
-          } catch (error) {
-            this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
-          }
-        }
+        await this._registerAllPrinters();
       }
 
-      // Step 4: Start heartbeat and job queue retry timer
+      // Step 4: Sync pending jobs from server
+      await this._syncPendingJobs();
+
+      // Step 5: Start heartbeat
       this.startHeartbeat();
-      this.jobQueue.startRetryTimer();
       this.emit('ready');
 
     } catch (error) {
       this.emit('error', error);
+      // Socket will auto-reconnect — don't throw
+    }
+  }
+
+  /**
+   * Register all detected printers with backend
+   * @private
+   */
+  async _registerAllPrinters() {
+    for (const printer of this.detectedPrinters) {
+      try {
+        await this.socket.registerPrinter(printer);
+        this.registeredPrinters.set(printer.systemName, printer);
+        this.emit('printer-registered', printer);
+      } catch (error) {
+        this.emit('error', new Error(`Failed to register printer ${printer.displayName}: ${error.message}`));
+      }
+    }
+  }
+
+  /**
+   * Sync pending jobs from backend after connect/reconnect
+   * @private
+   */
+  async _syncPendingJobs() {
+    if (!this.socket || !this.connected) return;
+
+    try {
+      const response = await this.socket.getAllPendingJobs();
+      const jobs = response?.jobs || response || [];
+
+      if (Array.isArray(jobs) && jobs.length > 0) {
+        let synced = 0;
+        for (const job of jobs) {
+          const enqueued = this.jobQueue.enqueue(job);
+          if (enqueued) {
+            synced++;
+            this.metrics.jobsReceived++;
+          }
+        }
+        if (synced > 0) {
+          this.metrics.pendingJobsSynced += synced;
+          this.emit('info', `Synced ${synced} pending jobs from server`);
+        }
+      }
+    } catch (error) {
+      // Non-fatal — server may not support getAllPendingJobs
+      this.emit('warning', `Could not sync pending jobs: ${error.message}`);
     }
   }
 
@@ -117,74 +174,168 @@ class PrintClientCore extends EventEmitter {
    * Setup queue event listeners and execute callback
    */
   setupQueueListeners() {
-    // The execute callback runs the actual print job
     this.jobQueue.setExecuteCallback(async (job) => {
-      // Find printer in registered (backend) or detected (local) printers
       const printer = this.registeredPrinters.get(job.printerSystemName)
         || this.detectedPrinters.find(p => p.systemName === job.printerSystemName);
+
       if (!printer) {
         throw new Error(`Printer not found: ${job.printerSystemName}`);
       }
 
       // Update backend: job sent to printer
       if (this.socket && this.connected) {
-        await this.socket.updateJobStatus(job.id, 'sent');
+        this.socket.updateJobStatus(job.id, 'sent').catch(() => {});
       }
 
-      // Execute print — returns OS spooler job ID
+      // Execute print
       const result = await this.executor.executePrintJob(job, printer);
       const osJobId = result?.osJobId || null;
 
-      // Monitor spooler for real status (paper jam, completed, etc.)
+      // Monitor spooler for real status (with safety timeout)
       await new Promise((resolve) => {
-        this.spoolerMonitor.monitor(printer.systemName, osJobId, (status, details) => {
+        let resolved = false;
+        const done = () => { if (!resolved) { resolved = true; resolve(); } };
+
+        // Safety timeout: if spooler never reports terminal status, don't hang forever
+        // SpoolerMonitor has its own 2min timeout, but this is a fallback
+        const safetyTimer = setTimeout(() => {
+          this.emit('warning', `Job #${job.id}: spooler monitor safety timeout — assuming completed`);
           if (this.socket && this.connected) {
-            if (status === 'completed') {
-              this.socket.updateJobStatus(job.id, 'completed', details).catch(() => {});
-              resolve();
-            } else if (status === 'failed') {
-              this.socket.updateJobStatus(job.id, 'failed', details).catch(() => {});
-              resolve();
-            } else if (status === 'printing' && details?.hasError) {
-              // Temporary error (paper jam, etc.) — report but keep monitoring
-              this.emit('warning', `Job #${job.id}: ${details.message}`);
+            this.socket.updateJobStatus(job.id, 'completed', { message: 'Safety timeout' });
+          }
+          done();
+        }, 150000); // 2.5 min (above spooler's 2min)
+
+        const cancelMonitor = this.spoolerMonitor.monitor(printer.systemName, osJobId, (status, details) => {
+          if (status === 'completed') {
+            clearTimeout(safetyTimer);
+            if (this.socket && this.connected) {
+              this.socket.updateJobStatus(job.id, 'completed', details);
             }
-          } else {
-            // Not connected — resolve immediately
-            resolve();
+            done();
+          } else if (status === 'failed') {
+            clearTimeout(safetyTimer);
+            if (this.socket && this.connected) {
+              this.socket.updateJobStatus(job.id, 'failed', details);
+            }
+            done();
+          } else if (status === 'printing' && details?.hasError) {
+            this.emit('warning', `Job #${job.id}: ${details.message}`);
           }
         });
       });
     });
 
     // Relay queue events
-    this.jobQueue.on('job-queued', (entry) => {
-      this.emit('job-queued', entry);
-    });
+    this.jobQueue.on('job-queued', (entry) => this.emit('job-queued', entry));
 
-    this.jobQueue.on('job-processing', (entry) => {
-      this.emit('job-executing', entry.job);
-    });
+    this.jobQueue.on('job-processing', (entry) => this.emit('job-executing', entry.job));
 
     this.jobQueue.on('job-completed', (entry) => {
+      this.metrics.jobsCompleted++;
       this.emit('job-completed', entry);
     });
 
     this.jobQueue.on('job-failed', (entry) => {
-      // Update backend with final failure
+      this.metrics.jobsFailed++;
       if (this.socket && this.connected) {
         this.socket.updateJobStatus(entry.id, 'failed', entry.error).catch(() => {});
       }
       this.emit('job-failed', entry);
     });
 
-    this.jobQueue.on('job-retrying', (entry) => {
-      this.emit('job-retrying', entry);
+    this.jobQueue.on('job-retrying', (entry) => this.emit('job-retrying', entry));
+
+    this.jobQueue.on('job-expired', (entry) => {
+      if (this.socket && this.connected) {
+        this.socket.updateJobStatus(entry.id, 'expired', { reason: 'TTL exceeded' }).catch(() => {});
+      }
+      this.emit('job-expired', entry);
     });
 
-    this.jobQueue.on('error', (error) => {
-      this.emit('error', error);
+    this.jobQueue.on('job-deduplicated', (info) => this.emit('job-deduplicated', info));
+
+    this.jobQueue.on('job-cancelled', (entry) => {
+      if (this.socket && this.connected) {
+        this.socket.updateJobStatus(entry.id, 'cancelled').catch(() => {});
+      }
+      this.emit('job-cancelled', entry);
     });
+
+    this.jobQueue.on('error', (error) => this.emit('error', error));
+  }
+
+  /**
+   * Setup socket event listeners
+   */
+  setupSocketListeners() {
+    // Connected (initial or state change)
+    this.socket.on('state_change', ({ from, to }) => {
+      this.emit('connection-state', { from, to });
+    });
+
+    this.socket.on('disconnected', () => {
+      this.connected = false;
+      this.metrics.lastDisconnectedAt = Date.now();
+      this.emit('disconnected');
+    });
+
+    this.socket.on('reconnecting', (info) => {
+      this.emit('reconnecting', info);
+    });
+
+    this.socket.on('reconnect_failed', (info) => {
+      this.emit('reconnect-failed', info);
+    });
+
+    // Reconnected — re-register printers + sync pending jobs
+    this.socket.on('reconnected', async () => {
+      this.connected = true;
+      this.metrics.lastConnectedAt = Date.now();
+      this.metrics.reconnections++;
+      this.emit('connected');
+      this.emit('info', `Reconnected (attempt #${this.metrics.reconnections})`);
+
+      // Sync pending jobs from backend
+      await this._syncPendingJobs();
+    });
+
+    // New print job from server
+    this.socket.on('new_print_job', (job) => {
+      this.metrics.jobsReceived++;
+      this.emit('job-received', job);
+      this.jobQueue.enqueue(job);
+    });
+
+    // Pending jobs pushed by server (on connect or broadcast)
+    this.socket.on('pending_jobs', (data) => {
+      const jobs = data?.jobs || data || [];
+      if (Array.isArray(jobs)) {
+        let synced = 0;
+        for (const job of jobs) {
+          if (this.jobQueue.enqueue(job)) synced++;
+        }
+        if (synced > 0) {
+          this.emit('info', `Received ${synced} pending jobs from server`);
+        }
+      }
+    });
+
+    this.socket.on('error', (error) => this.emit('error', error));
+  }
+
+  /**
+   * Start heartbeat to keep printers online
+   */
+  startHeartbeat() {
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+
+    this.heartbeatInterval = setInterval(() => {
+      if (this.socket && this.connected) {
+        this.socket.sendHeartbeat();
+        this.emit('heartbeat-sent');
+      }
+    }, this.config.heartbeatInterval);
   }
 
   /**
@@ -214,43 +365,7 @@ class PrintClientCore extends EventEmitter {
   }
 
   /**
-   * Setup socket event listeners
-   */
-  setupSocketListeners() {
-    this.socket.on('connected', () => {
-      this.connected = true;
-      this.emit('connected');
-    });
-
-    this.socket.on('disconnected', () => {
-      this.connected = false;
-      this.emit('disconnected');
-    });
-
-    this.socket.on('new_print_job', (job) => {
-      this.emit('job-received', job);
-      this.jobQueue.enqueue(job);
-    });
-
-    this.socket.on('error', (error) => {
-      this.emit('error', error);
-    });
-  }
-
-  /**
-   * Start heartbeat to keep printers online
-   */
-  startHeartbeat() {
-    this.heartbeatInterval = setInterval(() => {
-      if (this.socket && this.connected) {
-        this.socket.sendHeartbeat();
-        this.emit('heartbeat-sent');
-      }
-    }, this.config.heartbeatInterval);
-  }
-
-  /**
-   * Get registered printers
+   * Get detected printers
    */
   getPrinters() {
     return this.detectedPrinters;
@@ -261,6 +376,13 @@ class PrintClientCore extends EventEmitter {
    */
   isConnected() {
     return this.connected;
+  }
+
+  /**
+   * Get connection state from socket
+   */
+  getConnectionState() {
+    return this.socket?.getState() || 'disconnected';
   }
 
   /**
@@ -275,6 +397,41 @@ class PrintClientCore extends EventEmitter {
    */
   getRecentJobs(limit = 20) {
     return this.jobQueue.getRecentJobs(limit);
+  }
+
+  /**
+   * Get system metrics
+   */
+  getMetrics() {
+    const queueStats = this.jobQueue.getStats();
+    const uptime = this.metrics.startedAt ? Date.now() - this.metrics.startedAt : 0;
+    const total = this.metrics.jobsCompleted + this.metrics.jobsFailed;
+    const successRate = total > 0 ? ((this.metrics.jobsCompleted / total) * 100).toFixed(1) : '100.0';
+
+    return {
+      ...this.metrics,
+      uptime,
+      uptimeFormatted: this._formatUptime(uptime),
+      successRate: parseFloat(successRate),
+      connectionState: this.getConnectionState(),
+      queueStats
+    };
+  }
+
+  /**
+   * Format uptime to human readable
+   * @private
+   */
+  _formatUptime(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+    return `${seconds}s`;
   }
 
   /**
@@ -318,9 +475,14 @@ class PrintClientCore extends EventEmitter {
   }
 
   /**
+   * Cancel a job
+   */
+  cancelJob(jobId) {
+    return this.jobQueue.cancelJob(jobId);
+  }
+
+  /**
    * Send a test print job directly (no WebSocket needed)
-   * @param {string} printerSystemName - Target printer
-   * @param {string} type - 'thermal', 'pdf', or 'label'
    */
   testPrint(printerSystemName, type = 'thermal') {
     const testId = `test-${Date.now()}`;
@@ -387,7 +549,6 @@ class PrintClientCore extends EventEmitter {
       throw new Error(`Unknown test type: ${type}. Use: thermal, pdf, label`);
     }
 
-    // Enqueue directly — bypasses WebSocket
     this.emit('job-received', job);
     this.jobQueue.enqueue(job);
     return job;
@@ -400,7 +561,6 @@ class PrintClientCore extends EventEmitter {
     this.detectedPrinters = await this.detector.detectPrinters();
     this.emit('printers-updated', this.detectedPrinters);
 
-    // Register new printers with backend if connected
     if (this.connected && this.socket) {
       for (const printer of this.detectedPrinters) {
         if (!this.registeredPrinters.has(printer.systemName)) {

@@ -260,35 +260,57 @@ class PrintExecutor {
    * @param {string} url - Source URL
    * @param {string} destPath - Destination file path
    */
-  async downloadFile(url, destPath) {
+  async downloadFile(url, destPath, _redirectCount = 0) {
+    // Guard against infinite redirects
+    if (_redirectCount > 5) {
+      throw new Error('Download failed: too many redirects');
+    }
+
     const https = url.startsWith('https') ? require('https') : require('http');
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
+
       const file = fs.createWriteStream(destPath);
 
-      https.get(url, (response) => {
+      // Timeout: 30s for download
+      const timer = setTimeout(() => {
+        req.destroy();
+        file.close();
+        if (fs.existsSync(destPath)) try { fs.unlinkSync(destPath); } catch (_) {}
+        settle(reject, new Error('Download failed: timeout (30s)'));
+      }, 30000);
+
+      const req = https.get(url, (response) => {
         if (response.statusCode === 301 || response.statusCode === 302) {
-          // Follow redirect
+          clearTimeout(timer);
           file.close();
-          fs.unlinkSync(destPath);
-          return this.downloadFile(response.headers.location, destPath).then(resolve).catch(reject);
+          if (fs.existsSync(destPath)) try { fs.unlinkSync(destPath); } catch (_) {}
+          return this.downloadFile(response.headers.location, destPath, _redirectCount + 1)
+            .then(r => settle(resolve, r)).catch(e => settle(reject, e));
         }
 
         if (response.statusCode !== 200) {
+          clearTimeout(timer);
           file.close();
-          fs.unlinkSync(destPath);
-          return reject(new Error(`Download failed: HTTP ${response.statusCode}`));
+          if (fs.existsSync(destPath)) try { fs.unlinkSync(destPath); } catch (_) {}
+          return settle(reject, new Error(`Download failed: HTTP ${response.statusCode}`));
         }
 
         response.pipe(file);
 
         file.on('finish', () => {
-          file.close(resolve);
+          clearTimeout(timer);
+          file.close(() => settle(resolve));
         });
-      }).on('error', (error) => {
+      });
+
+      req.on('error', (error) => {
+        clearTimeout(timer);
         file.close();
-        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-        reject(new Error(`Download failed: ${error.message}`));
+        if (fs.existsSync(destPath)) try { fs.unlinkSync(destPath); } catch (_) {}
+        settle(reject, new Error(`Download failed: ${error.message}`));
       });
     });
   }

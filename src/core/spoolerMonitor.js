@@ -53,6 +53,16 @@ class SpoolerMonitor {
     let lastStatus = null;
     let sawPrinting = false;   // Did we ever see the job actively PRINTING?
     let lastHadError = false;  // Was the last known status an error state?
+    let terminated = false;    // Guard: prevent double terminal callback
+
+    // Wrap callback to enforce single terminal call
+    const safeCallback = (status, details) => {
+      if (status === 'completed' || status === 'failed') {
+        if (terminated) return; // Already called with terminal status
+        terminated = true;
+      }
+      onStatusChange(status, details);
+    };
 
     const interval = setInterval(() => {
       try {
@@ -60,7 +70,7 @@ class SpoolerMonitor {
         if (Date.now() - startTime > this.maxPollTime) {
           this.logger.warn(`[SpoolerMonitor] Timeout monitoring job ${numericJobId} — assuming completed`);
           this._cleanup(jobKey);
-          onStatusChange('completed', { message: 'Monitoring timeout — assumed completed', osStatus: lastStatus });
+          safeCallback('completed', { message: 'Monitoring timeout — assumed completed', osStatus: lastStatus });
           return;
         }
 
@@ -73,15 +83,15 @@ class SpoolerMonitor {
           if (sawPrinting && !lastHadError) {
             // We saw it printing normally then it disappeared → completed
             this.logger.info(`[SpoolerMonitor] Job ${numericJobId} finished printing and removed from spooler`);
-            onStatusChange('completed', { message: 'Job finished and removed from spooler' });
+            safeCallback('completed', { message: 'Job finished and removed from spooler' });
           } else if (lastHadError) {
             // Last state was an error (paper out, blocked) then disappeared → likely cancelled
             this.logger.info(`[SpoolerMonitor] Job ${numericJobId} disappeared after error — marking as failed`);
-            onStatusChange('failed', { message: 'Job removed from spooler after error (likely cancelled)', osStatus: lastStatus });
+            safeCallback('failed', { message: 'Job removed from spooler after error (likely cancelled)', osStatus: lastStatus });
           } else {
             // Never saw it print, just disappeared → cancelled or removed
             this.logger.info(`[SpoolerMonitor] Job ${numericJobId} disappeared without printing — marking as failed`);
-            onStatusChange('failed', { message: 'Job removed from spooler before printing (cancelled)', osStatus: lastStatus });
+            safeCallback('failed', { message: 'Job removed from spooler before printing (cancelled)', osStatus: lastStatus });
           }
           return;
         }
@@ -90,9 +100,9 @@ class SpoolerMonitor {
           // Job disappeared from spooler — same logic
           this._cleanup(jobKey);
           if (sawPrinting && !lastHadError) {
-            onStatusChange('completed', { message: 'Job completed (removed from spooler)' });
+            safeCallback('completed', { message: 'Job completed (removed from spooler)' });
           } else {
-            onStatusChange('failed', { message: 'Job removed from spooler (cancelled)', osStatus: lastStatus });
+            safeCallback('failed', { message: 'Job removed from spooler (cancelled)', osStatus: lastStatus });
           }
           return;
         }
@@ -110,19 +120,19 @@ class SpoolerMonitor {
         // Check for terminal states
         if (statusArr.includes('PRINTED')) {
           this._cleanup(jobKey);
-          onStatusChange('completed', { message: 'Printing completed', osStatus: statusArr });
+          safeCallback('completed', { message: 'Printing completed', osStatus: statusArr });
           return;
         }
 
         if (statusArr.includes('CANCELLED')) {
           this._cleanup(jobKey);
-          onStatusChange('failed', { message: 'Job cancelled in spooler', osStatus: statusArr });
+          safeCallback('failed', { message: 'Job cancelled in spooler', osStatus: statusArr });
           return;
         }
 
         if (statusArr.includes('ABORTED')) {
           this._cleanup(jobKey);
-          onStatusChange('failed', { message: 'Job aborted by spooler', osStatus: statusArr });
+          safeCallback('failed', { message: 'Job aborted by spooler', osStatus: statusArr });
           return;
         }
 
@@ -131,7 +141,7 @@ class SpoolerMonitor {
           lastHadError = true;
           // Don't mark as failed yet — these can be temporary
           // Report as still printing but with error details
-          onStatusChange('printing', {
+          safeCallback('printing', {
             message: `Printer issue: ${statusArr.join(', ')}`,
             osStatus: statusArr,
             hasError: true
@@ -143,7 +153,7 @@ class SpoolerMonitor {
         if (statusArr.includes('PRINTING')) {
           sawPrinting = true;
           lastHadError = false; // Clear error flag when printing resumes
-          onStatusChange('printing', { message: 'Printing in progress', osStatus: statusArr });
+          safeCallback('printing', { message: 'Printing in progress', osStatus: statusArr });
         }
 
       } catch (error) {

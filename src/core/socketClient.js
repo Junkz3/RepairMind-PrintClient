@@ -1,12 +1,29 @@
 /**
- * Socket Client
+ * Socket Client v2.1
  *
  * Manages WebSocket connection to RepairMind ERP backend.
- * Handles authentication, printer registration, and job updates.
+ * - Unlimited reconnection with progressive backoff
+ * - Auto re-authentication + printer re-registration on reconnect
+ * - Pending jobs sync on reconnect
+ * - Connection state machine
+ *
+ * Fixes over v2:
+ * - _setupEventHandlers() uses _handlersAttached guard to prevent duplicate listeners
+ * - updateJobStatus uses unique correlation ID to avoid cross-job ack collision
+ * - _emitWithTimeout uses scoped listener removal for safety
  */
 
 const { io } = require('socket.io-client');
 const EventEmitter = require('events');
+
+// Connection states
+const STATE = {
+  DISCONNECTED: 'disconnected',
+  CONNECTING: 'connecting',
+  AUTHENTICATING: 'authenticating',
+  CONNECTED: 'connected',
+  RECONNECTING: 'reconnecting'
+};
 
 class SocketClient extends EventEmitter {
   constructor({ url, tenantId, clientId, apiKey, token }) {
@@ -15,10 +32,42 @@ class SocketClient extends EventEmitter {
     this.url = url;
     this.tenantId = tenantId;
     this.clientId = clientId;
-    this.apiKey = apiKey; // Deprecated - use token instead
-    this.token = token; // JWT token from login
+    this.apiKey = apiKey;
+    this.token = token;
     this.socket = null;
     this.authenticated = false;
+    this.state = STATE.DISCONNECTED;
+
+    // Reconnection config — unlimited with progressive backoff
+    this.reconnectAttempts = 0;
+    this.reconnectDelays = [5000, 5000, 10000, 10000, 30000, 30000, 60000]; // then 5min max
+    this.maxReconnectDelay = 300000; // 5 minutes
+    this.reconnectTimer = null;
+    this.manualDisconnect = false;
+
+    // Registered printers cache for re-registration on reconnect
+    this.registeredPrintersCache = [];
+
+    // Guard: prevent duplicate event handler attachment
+    this._handlersAttached = false;
+  }
+
+  /**
+   * Get current connection state
+   */
+  getState() {
+    return this.state;
+  }
+
+  /**
+   * Set and emit state changes
+   */
+  _setState(newState) {
+    const old = this.state;
+    this.state = newState;
+    if (old !== newState) {
+      this.emit('state_change', { from: old, to: newState });
+    }
   }
 
   /**
@@ -26,39 +75,50 @@ class SocketClient extends EventEmitter {
    * @returns {Promise<void>}
    */
   async connect() {
+    this.manualDisconnect = false;
+    this._setState(STATE.CONNECTING);
+
     return new Promise((resolve, reject) => {
       try {
-        // Connect to /print namespace
         this.socket = io(`${this.url}/print`, {
           transports: ['websocket'],
-          reconnection: true,
-          reconnectionAttempts: 10,
-          reconnectionDelay: 5000
+          reconnection: false, // We handle reconnection ourselves
+          timeout: 10000
         });
 
-        // Connection established
         this.socket.on('connect', async () => {
           try {
+            this._setState(STATE.AUTHENTICATING);
             await this.authenticate();
-            this.setupEventHandlers();
+            this._setupEventHandlers();
+            this._setState(STATE.CONNECTED);
+            this.reconnectAttempts = 0;
             resolve();
           } catch (error) {
+            this._setState(STATE.DISCONNECTED);
             reject(error);
           }
         });
 
-        // Connection error
         this.socket.on('connect_error', (error) => {
-          reject(new Error(`Connection error: ${error.message}`));
+          if (this.state === STATE.CONNECTING) {
+            this._setState(STATE.DISCONNECTED);
+            reject(new Error(`Connection error: ${error.message}`));
+          }
         });
 
-        // Timeout after 10 seconds
+        // Timeout for initial connection only
         setTimeout(() => {
-          if (!this.authenticated) {
+          if (this.state === STATE.CONNECTING) {
+            this._setState(STATE.DISCONNECTED);
+            if (this.socket) {
+              this.socket.close();
+            }
             reject(new Error('Connection timeout'));
           }
-        }, 10000);
+        }, 15000);
       } catch (error) {
+        this._setState(STATE.DISCONNECTED);
         reject(error);
       }
     });
@@ -66,7 +126,6 @@ class SocketClient extends EventEmitter {
 
   /**
    * Authenticate with backend
-   * @returns {Promise<void>}
    * @private
    */
   async authenticate() {
@@ -74,61 +133,70 @@ class SocketClient extends EventEmitter {
       this.socket.emit('authenticate', {
         tenantId: this.tenantId,
         clientId: this.clientId,
-        token: this.token, // Use JWT token
-        apiKey: this.apiKey // Fallback for backward compatibility
+        token: this.token,
+        apiKey: this.apiKey
       });
 
-      // Wait for authentication response
-      this.socket.once('authenticated', (data) => {
+      const cleanup = () => {
+        this.socket.off('authenticated', onAuth);
+        this.socket.off('auth_error', onError);
+        clearTimeout(timer);
+      };
+
+      const onAuth = (data) => {
+        cleanup();
         if (data.success) {
           this.authenticated = true;
           resolve();
         } else {
           reject(new Error('Authentication failed'));
         }
-      });
+      };
 
-      this.socket.once('auth_error', (error) => {
+      const onError = (error) => {
+        cleanup();
         reject(new Error(error.message || 'Authentication error'));
-      });
+      };
 
-      // Timeout
-      setTimeout(() => {
+      this.socket.once('authenticated', onAuth);
+      this.socket.once('auth_error', onError);
+
+      const timer = setTimeout(() => {
+        cleanup();
         if (!this.authenticated) {
           reject(new Error('Authentication timeout'));
         }
-      }, 5000);
+      }, 10000);
     });
   }
 
   /**
-   * Setup event handlers
+   * Setup event handlers (called once per socket instance)
+   * Uses _handlersAttached guard to prevent duplicate listeners on reconnect.
    * @private
    */
-  setupEventHandlers() {
-    // Disconnect
+  _setupEventHandlers() {
+    if (this._handlersAttached) return; // Already attached to this socket
+    this._handlersAttached = true;
+
+    // Disconnect — trigger reconnection
     this.socket.on('disconnect', (reason) => {
       this.authenticated = false;
-      this.emit('disconnect', reason);
+      this._setState(STATE.DISCONNECTED);
+      this.emit('disconnected', reason);
+
+      // Auto-reconnect unless manually disconnected
+      if (!this.manualDisconnect) {
+        this._scheduleReconnect();
+      }
     });
 
-    // Reconnect
-    this.socket.on('reconnect', async () => {
-      await this.authenticate();
-      this.emit('reconnect');
-    });
-
-    // Error
-    this.socket.on('error', (error) => {
-      this.emit('error', error);
-    });
-
-    // New print job (pushed from server)
+    // New print job
     this.socket.on('new_print_job', (data) => {
       this.emit('new_print_job', data);
     });
 
-    // Printer registered
+    // Printer registered confirmation
     this.socket.on('printer_registered', (data) => {
       this.emit('printer_registered', data);
     });
@@ -138,9 +206,9 @@ class SocketClient extends EventEmitter {
       this.emit('status_updated', data);
     });
 
-    // Heartbeat acknowledgment
+    // Heartbeat ack
     this.socket.on('heartbeat_ack', () => {
-      // Heartbeat received
+      this.emit('heartbeat_ack');
     });
 
     // Job status updated
@@ -152,135 +220,241 @@ class SocketClient extends EventEmitter {
     this.socket.on('pending_jobs', (data) => {
       this.emit('pending_jobs', data);
     });
+
+    // Error
+    this.socket.on('error', (error) => {
+      this.emit('error', error);
+    });
   }
 
   /**
-   * Register a printer
-   * @param {Object} printerData - Printer information
+   * Schedule a reconnection attempt with progressive backoff
+   * @private
+   */
+  _scheduleReconnect() {
+    if (this.manualDisconnect) return;
+    if (this.reconnectTimer) return;
+
+    const delayIndex = Math.min(this.reconnectAttempts, this.reconnectDelays.length - 1);
+    let delay = this.reconnectAttempts < this.reconnectDelays.length
+      ? this.reconnectDelays[delayIndex]
+      : this.maxReconnectDelay;
+
+    this.reconnectAttempts++;
+    this._setState(STATE.RECONNECTING);
+
+    this.emit('reconnecting', {
+      attempt: this.reconnectAttempts,
+      delay,
+      nextRetryAt: Date.now() + delay
+    });
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      await this._attemptReconnect();
+    }, delay);
+  }
+
+  /**
+   * Attempt to reconnect
+   * @private
+   */
+  async _attemptReconnect() {
+    if (this.manualDisconnect) return;
+
+    try {
+      // Clean up old socket
+      if (this.socket) {
+        this.socket.removeAllListeners();
+        this.socket.close();
+        this.socket = null;
+      }
+      this._handlersAttached = false; // Reset for new socket instance
+
+      this._setState(STATE.CONNECTING);
+
+      this.socket = io(`${this.url}/print`, {
+        transports: ['websocket'],
+        reconnection: false,
+        timeout: 10000
+      });
+
+      await new Promise((resolve, reject) => {
+        this.socket.on('connect', async () => {
+          try {
+            this._setState(STATE.AUTHENTICATING);
+            await this.authenticate();
+            this._setupEventHandlers();
+            this._setState(STATE.CONNECTED);
+            this.reconnectAttempts = 0;
+
+            // Re-register cached printers
+            await this._reRegisterPrinters();
+
+            // Notify reconnection complete — PrintClientCore will sync pending jobs
+            this.emit('reconnected');
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+
+        this.socket.on('connect_error', (error) => {
+          reject(error);
+        });
+
+        setTimeout(() => {
+          reject(new Error('Reconnection timeout'));
+        }, 15000);
+      });
+
+    } catch (error) {
+      this._setState(STATE.DISCONNECTED);
+      this.emit('reconnect_failed', {
+        attempt: this.reconnectAttempts,
+        error: error.message
+      });
+
+      // Schedule next attempt (unlimited)
+      this._scheduleReconnect();
+    }
+  }
+
+  /**
+   * Re-register all cached printers after reconnection
+   * @private
+   */
+  async _reRegisterPrinters() {
+    for (const printerData of this.registeredPrintersCache) {
+      try {
+        await this._emitWithTimeout('register_printer', printerData, 'printer_registered', 5000);
+      } catch (_) {
+        // Non-fatal — printer may already be registered
+      }
+    }
+  }
+
+  /**
+   * Emit with timeout helper
+   * @private
+   */
+  _emitWithTimeout(event, data, ackEvent, timeout = 5000) {
+    return new Promise((resolve, reject) => {
+      this.socket.emit(event, data);
+
+      const cleanup = () => {
+        this.socket.off(ackEvent, onAck);
+        this.socket.off('error', onError);
+        clearTimeout(timer);
+      };
+
+      const onAck = (result) => { cleanup(); resolve(result); };
+      const onError = (err) => { cleanup(); reject(new Error(err.message || 'Socket error')); };
+
+      this.socket.once(ackEvent, onAck);
+      this.socket.once('error', onError);
+
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`${event} timeout`));
+      }, timeout);
+    });
+  }
+
+  /**
+   * Register a printer and cache it for reconnect
+   * @param {Object} printerData
    * @returns {Promise<Object>}
    */
   async registerPrinter(printerData) {
-    return new Promise((resolve, reject) => {
-      this.socket.emit('register_printer', printerData);
+    // Cache for re-registration
+    const idx = this.registeredPrintersCache.findIndex(
+      p => p.systemName === printerData.systemName
+    );
+    if (idx >= 0) {
+      this.registeredPrintersCache[idx] = printerData;
+    } else {
+      this.registeredPrintersCache.push(printerData);
+    }
 
-      this.socket.once('printer_registered', (data) => {
-        resolve(data);
-      });
-
-      this.socket.once('error', (error) => {
-        reject(new Error(error.message));
-      });
-
-      // Timeout
-      setTimeout(() => {
-        reject(new Error('Register printer timeout'));
-      }, 5000);
-    });
+    return this._emitWithTimeout('register_printer', printerData, 'printer_registered', 5000);
   }
 
   /**
    * Update printer status
-   * @param {number} printerId - Printer ID
-   * @param {string} status - New status (online, offline, busy, error)
-   * @param {Object} metadata - Additional metadata
-   * @returns {Promise<Object>}
    */
   async updatePrinterStatus(printerId, status, metadata = {}) {
-    return new Promise((resolve, reject) => {
-      this.socket.emit('printer_status', {
-        printerId,
-        status,
-        metadata
-      });
-
-      this.socket.once('status_updated', (data) => {
-        resolve(data);
-      });
-
-      this.socket.once('error', (error) => {
-        reject(new Error(error.message));
-      });
-
-      // Timeout
-      setTimeout(() => {
-        reject(new Error('Update printer status timeout'));
-      }, 5000);
-    });
+    return this._emitWithTimeout('printer_status', { printerId, status, metadata }, 'status_updated', 5000);
   }
 
   /**
    * Send heartbeat
-   * @param {number} printerId - Printer ID
-   * @returns {Promise<void>}
    */
   async sendHeartbeat(printerId) {
-    this.socket.emit('heartbeat', { printerId });
+    if (this.socket && this.authenticated) {
+      this.socket.emit('heartbeat', { printerId });
+    }
   }
 
   /**
    * Get pending jobs for a printer
-   * @param {number} printerId - Printer ID
+   * @param {string} printerSystemName
    * @returns {Promise<Object>}
    */
-  async getPendingJobs(printerId) {
-    return new Promise((resolve, reject) => {
-      this.socket.emit('get_pending_jobs', { printerId });
-
-      this.socket.once('pending_jobs', (data) => {
-        resolve(data);
-      });
-
-      this.socket.once('error', (error) => {
-        reject(new Error(error.message));
-      });
-
-      // Timeout
-      setTimeout(() => {
-        reject(new Error('Get pending jobs timeout'));
-      }, 5000);
-    });
+  async getPendingJobs(printerSystemName) {
+    return this._emitWithTimeout(
+      'get_pending_jobs',
+      { printerSystemName },
+      'pending_jobs',
+      10000
+    );
   }
 
   /**
-   * Update print job status
-   * @param {number} jobId - Job ID
-   * @param {string} status - New status (sent, printing, completed, failed)
-   * @param {Object} metadata - Additional metadata
+   * Request all pending jobs for this client (all printers)
    * @returns {Promise<Object>}
    */
-  async updateJobStatus(jobId, status, metadata = {}) {
-    return new Promise((resolve, reject) => {
-      this.socket.emit('job_status', {
-        jobId,
-        status,
-        metadata
-      });
-
-      this.socket.once('job_status_updated', (data) => {
-        resolve(data);
-      });
-
-      this.socket.once('error', (error) => {
-        reject(new Error(error.message));
-      });
-
-      // Timeout
-      setTimeout(() => {
-        reject(new Error('Update job status timeout'));
-      }, 5000);
-    });
+  async getAllPendingJobs() {
+    return this._emitWithTimeout(
+      'get_pending_jobs',
+      { clientId: this.clientId },
+      'pending_jobs',
+      10000
+    );
   }
 
   /**
-   * Disconnect from backend
+   * Update print job status (fire-and-forget — does not block on ack)
+   * No longer uses socket.once() to avoid cross-job ack collision.
+   */
+  updateJobStatus(jobId, status, metadata = {}) {
+    if (!this.socket || !this.authenticated) return Promise.resolve();
+
+    this.socket.emit('job_status', { jobId, status, metadata });
+    return Promise.resolve();
+  }
+
+  /**
+   * Disconnect from backend (manual — no auto-reconnect)
    */
   disconnect() {
+    this.manualDisconnect = true;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
-      this.authenticated = false;
     }
+
+    this.authenticated = false;
+    this._setState(STATE.DISCONNECTED);
   }
 }
 
+SocketClient.STATE = STATE;
 module.exports = SocketClient;

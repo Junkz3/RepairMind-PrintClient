@@ -1,255 +1,161 @@
 #!/usr/bin/env node
 
 /**
- * RepairMind Print Client
+ * RepairMind Print Client v2 - Headless CLI Mode
  *
- * Detects local printers and executes print jobs from RepairMind ERP.
- * Connects to backend via WebSocket for real-time communication.
+ * Uses PrintClientCore (same as Electron) for consistent behavior.
+ * Suitable for server deployments without a GUI.
  */
 
 require('dotenv').config();
 const chalk = require('chalk');
 const ora = require('ora');
-const PrinterDetector = require('./printerDetector');
-const SocketClient = require('./socketClient');
-const PrintExecutor = require('./printExecutor');
+const PrintClientCore = require('./PrintClientCore');
+const ConfigManager = require('./ConfigManager');
 
-class PrintClient {
+class HeadlessPrintClient {
   constructor() {
-    this.detector = new PrinterDetector();
-    this.executor = new PrintExecutor();
-    this.socket = null;
-    this.registeredPrinters = new Map(); // systemName -> printer object
-    this.heartbeatInterval = null;
+    this.core = null;
+    this.metricsInterval = null;
   }
 
-  /**
-   * Start the print client
-   */
   async start() {
-    console.log(chalk.blue.bold('\n🖨️  RepairMind Print Client v1.0.0\n'));
+    console.log(chalk.blue.bold('\n  RepairMind Print Client v2.0.0 (Headless)\n'));
 
-    // Step 1: Detect printers
-    const spinner = ora('Detecting local printers...').start();
+    // Initialize ConfigManager (works without Electron via electron-store fallback)
+    let configManager;
     try {
-      const printers = await this.detector.detectPrinters();
-
-      if (printers.length === 0) {
-        spinner.warn('No printers detected');
-        console.log(chalk.yellow('Please connect a printer and restart the client.'));
-        process.exit(0);
-      }
-
-      spinner.succeed(`Detected ${printers.length} printer(s)`);
-
-      printers.forEach((printer, index) => {
-        console.log(chalk.green(`  ${index + 1}. ${printer.displayName} (${printer.type})`));
-      });
-
-      this.detectedPrinters = printers;
-    } catch (error) {
-      spinner.fail('Failed to detect printers');
-      console.error(chalk.red(error.message));
-      process.exit(1);
+      configManager = new ConfigManager();
+    } catch (_) {
+      // electron-store may fail without Electron — use env vars
+      configManager = null;
     }
 
-    // Step 2: Connect to backend WebSocket
-    console.log('');
-    const connectSpinner = ora('Connecting to RepairMind ERP...').start();
+    const config = {
+      websocketUrl: process.env.WEBSOCKET_URL || 'wss://ws-dev.repairmind.fr',
+      backendUrl: process.env.BACKEND_URL || 'https://ws-dev.repairmind.fr',
+      tenantId: process.env.TENANT_ID,
+      clientId: process.env.CLIENT_ID || `${require('os').hostname()}-cli-${Date.now()}`,
+      apiKey: process.env.API_KEY,
+      token: process.env.TOKEN,
+      heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL) || 30000,
+      autoRegister: process.env.AUTO_REGISTER !== 'false'
+    };
+
+    if (configManager) {
+      config.configManager = configManager;
+    }
+
+    this.core = new PrintClientCore(config);
+
+    // Setup event listeners
+    this.setupEvents();
+
+    // Start
+    const spinner = ora('Starting print client...').start();
 
     try {
-      this.socket = new SocketClient({
-        url: process.env.WEBSOCKET_URL || 'ws://localhost:5001',
-        tenantId: process.env.TENANT_ID,
-        clientId: process.env.CLIENT_ID,
-        apiKey: process.env.API_KEY
-      });
-
-      await this.socket.connect();
-      connectSpinner.succeed('Connected to RepairMind ERP');
-
-      // Register event handlers
-      this.setupEventHandlers();
+      await this.core.start();
+      spinner.succeed('Print client started');
     } catch (error) {
-      connectSpinner.fail('Connection failed');
-      console.error(chalk.red(error.message));
-      process.exit(1);
+      spinner.warn(`Started with issues: ${error.message}`);
+      console.log(chalk.yellow('  Will auto-reconnect in background...\n'));
     }
 
-    // Step 3: Register printers
-    if (process.env.AUTO_REGISTER === 'true') {
-      console.log('');
-      await this.registerPrinters();
+    // Print status
+    const printers = this.core.getPrinters();
+    if (printers.length > 0) {
+      console.log(chalk.green(`\n  Printers detected: ${printers.length}`));
+      printers.forEach((p, i) => {
+        console.log(chalk.gray(`    ${i + 1}. ${p.displayName} (${p.type}, ${p.interface})`));
+      });
+    } else {
+      console.log(chalk.yellow('\n  No printers detected.'));
     }
 
-    // Step 4: Start heartbeat
-    this.startHeartbeat();
+    console.log(chalk.gray('\n  Press Ctrl+C to exit\n'));
 
-    console.log(chalk.green.bold('\n✅ Print client is ready!\n'));
-    console.log(chalk.gray('Press Ctrl+C to exit\n'));
+    // Periodic metrics display
+    this.metricsInterval = setInterval(() => {
+      const m = this.core.getMetrics();
+      const state = m.connectionState === 'connected' ? chalk.green('connected') : chalk.red(m.connectionState);
+      console.log(chalk.gray(
+        `  [${new Date().toLocaleTimeString()}] ` +
+        `State: ${state} | ` +
+        `Jobs: ${m.jobsCompleted}/${m.jobsReceived} completed | ` +
+        `Queue: ${m.queueStats.queued} pending | ` +
+        `Uptime: ${m.uptimeFormatted}`
+      ));
+    }, 60000);
   }
 
-  /**
-   * Register all detected printers with the backend
-   */
-  async registerPrinters() {
-    const spinner = ora('Registering printers...').start();
-
-    for (const printer of this.detectedPrinters) {
-      try {
-        const result = await this.socket.registerPrinter(printer);
-
-        if (result.isNew) {
-          spinner.info(`Registered new printer: ${result.printer.displayName}`);
-        } else {
-          spinner.info(`Updated printer: ${result.printer.displayName}`);
-        }
-
-        this.registeredPrinters.set(printer.systemName, result.printer);
-      } catch (error) {
-        spinner.warn(`Failed to register ${printer.displayName}: ${error.message}`);
-      }
-    }
-
-    spinner.succeed(`Registered ${this.registeredPrinters.size} printer(s)`);
-  }
-
-  /**
-   * Setup WebSocket event handlers
-   */
-  setupEventHandlers() {
-    // New print job received
-    this.socket.on('new_print_job', async (data) => {
-      console.log(chalk.blue(`\n📄 New print job received: ${data.documentType} (ID: ${data.jobId})`));
-
-      // Get pending jobs for this printer
-      const pendingJobs = await this.socket.getPendingJobs(data.printerId);
-
-      if (pendingJobs.jobs.length > 0) {
-        await this.processPrintJobs(pendingJobs.jobs);
-      }
+  setupEvents() {
+    this.core.on('connected', () => {
+      console.log(chalk.green('  [Connected] to RepairMind ERP'));
     });
 
-    // Error from server
-    this.socket.on('error', (error) => {
-      console.error(chalk.red(`\n❌ Error: ${error.message}`));
+    this.core.on('disconnected', () => {
+      console.log(chalk.yellow('  [Disconnected] from server'));
     });
 
-    // Disconnected
-    this.socket.on('disconnect', () => {
-      console.log(chalk.yellow('\n⚠️  Disconnected from server'));
-      this.stopHeartbeat();
+    this.core.on('reconnecting', (info) => {
+      console.log(chalk.yellow(`  [Reconnecting] attempt #${info.attempt} in ${info.delay / 1000}s...`));
     });
 
-    // Reconnected
-    this.socket.on('reconnect', () => {
-      console.log(chalk.green('\n✅ Reconnected to server'));
-      this.startHeartbeat();
+    this.core.on('reconnect-failed', (info) => {
+      console.log(chalk.red(`  [Reconnect failed] attempt #${info.attempt}: ${info.error}`));
+    });
+
+    this.core.on('job-received', (job) => {
+      console.log(chalk.blue(`  [Job received] #${job.id} (${job.documentType}) → ${job.printerSystemName}`));
+    });
+
+    this.core.on('job-completed', (entry) => {
+      console.log(chalk.green(`  [Job completed] #${entry.id}`));
+    });
+
+    this.core.on('job-failed', (entry) => {
+      console.log(chalk.red(`  [Job failed] #${entry.id}: ${entry.error}`));
+    });
+
+    this.core.on('job-retrying', (entry) => {
+      console.log(chalk.yellow(`  [Job retrying] #${entry.id} (attempt ${entry.retries}/${entry.maxRetries})`));
+    });
+
+    this.core.on('job-expired', (entry) => {
+      console.log(chalk.gray(`  [Job expired] #${entry.id}`));
+    });
+
+    this.core.on('info', (msg) => {
+      console.log(chalk.cyan(`  [Info] ${msg}`));
+    });
+
+    this.core.on('warning', (msg) => {
+      console.log(chalk.yellow(`  [Warning] ${msg}`));
+    });
+
+    this.core.on('error', (error) => {
+      console.error(chalk.red(`  [Error] ${error.message || error}`));
     });
   }
 
-  /**
-   * Process pending print jobs
-   */
-  async processPrintJobs(jobs) {
-    for (const job of jobs) {
-      console.log(chalk.blue(`\nProcessing job #${job.id} (${job.documentType})...`));
-
-      try {
-        // Update status to "printing"
-        await this.socket.updateJobStatus(job.id, 'printing');
-
-        // Find printer
-        const printer = Array.from(this.registeredPrinters.values()).find(
-          p => p.id === job.printerId
-        );
-
-        if (!printer) {
-          throw new Error('Printer not found');
-        }
-
-        // Execute print job
-        const startTime = Date.now();
-        await this.executor.executePrintJob(job, printer);
-        const duration = Date.now() - startTime;
-
-        // Update status to "completed"
-        await this.socket.updateJobStatus(job.id, 'completed', {
-          printedPages: 1, // TODO: Get actual page count
-          duration
-        });
-
-        console.log(chalk.green(`✅ Job #${job.id} completed (${duration}ms)`));
-      } catch (error) {
-        console.error(chalk.red(`❌ Job #${job.id} failed: ${error.message}`));
-
-        // Update status to "failed"
-        await this.socket.updateJobStatus(job.id, 'failed', {
-          error: error.message,
-          stack: error.stack
-        });
-      }
-    }
-  }
-
-  /**
-   * Start heartbeat to keep printers online
-   */
-  startHeartbeat() {
-    const interval = parseInt(process.env.HEARTBEAT_INTERVAL) || 30000;
-
-    this.heartbeatInterval = setInterval(async () => {
-      for (const printer of this.registeredPrinters.values()) {
-        try {
-          // Check if printer is still available
-          const isAvailable = await this.detector.isPrinterAvailable(printer.systemName);
-
-          const status = isAvailable ? 'online' : 'offline';
-
-          // Send heartbeat + status
-          await this.socket.sendHeartbeat(printer.id);
-          await this.socket.updatePrinterStatus(printer.id, status);
-        } catch (error) {
-          console.error(chalk.red(`Heartbeat error for ${printer.displayName}: ${error.message}`));
-        }
-      }
-    }, interval);
-  }
-
-  /**
-   * Stop heartbeat
-   */
-  stopHeartbeat() {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-  }
-
-  /**
-   * Graceful shutdown
-   */
   async shutdown() {
-    console.log(chalk.yellow('\n\n🛑 Shutting down...\n'));
+    console.log(chalk.yellow('\n  Shutting down...\n'));
 
-    // Mark all printers as offline
-    for (const printer of this.registeredPrinters.values()) {
-      try {
-        await this.socket.updatePrinterStatus(printer.id, 'offline');
-      } catch (error) {
-        // Ignore errors during shutdown
-      }
+    if (this.metricsInterval) {
+      clearInterval(this.metricsInterval);
     }
 
-    // Stop heartbeat
-    this.stopHeartbeat();
+    if (this.core) {
+      // Print final metrics
+      const m = this.core.getMetrics();
+      console.log(chalk.gray(`  Final stats: ${m.jobsCompleted} completed, ${m.jobsFailed} failed, ${m.reconnections} reconnections`));
+      console.log(chalk.gray(`  Uptime: ${m.uptimeFormatted}`));
 
-    // Disconnect socket
-    if (this.socket) {
-      this.socket.disconnect();
+      this.core.stop();
     }
 
-    console.log(chalk.green('✅ Shutdown complete\n'));
+    console.log(chalk.green('  Shutdown complete\n'));
     process.exit(0);
   }
 }
@@ -258,14 +164,12 @@ class PrintClient {
 // MAIN
 // ═══════════════════════════════════════════════════════════════
 
-const client = new PrintClient();
+const client = new HeadlessPrintClient();
 
-// Handle graceful shutdown
 process.on('SIGINT', () => client.shutdown());
 process.on('SIGTERM', () => client.shutdown());
 
-// Start client
 client.start().catch((error) => {
-  console.error(chalk.red('\n❌ Fatal error:'), error);
+  console.error(chalk.red('\n  Fatal error:'), error);
   process.exit(1);
 });
