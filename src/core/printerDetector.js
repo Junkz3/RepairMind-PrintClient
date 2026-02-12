@@ -202,12 +202,32 @@ class PrinterDetector {
    */
   detectInterface(printer) {
     const portName = (printer.portName || '').toLowerCase();
+    const name = (printer.name || '').toLowerCase();
+    const uri = (printer.uri || printer.options?.['device-uri'] || '').toLowerCase();
 
+    // 1. Check portName (Windows typically provides this)
     if (portName.includes('usb')) return 'usb';
     if (portName.includes('tcp') || portName.includes('ip') || portName.includes('net')) return 'network';
     if (portName.includes('bt') || portName.includes('bluetooth')) return 'bluetooth';
     if (portName.includes('com') || portName.includes('serial')) return 'serial';
     if (portName.includes('lpt') || portName.includes('parallel')) return 'parallel';
+
+    // 2. Check CUPS device-uri (Linux/macOS)
+    if (uri) {
+      if (uri.startsWith('usb://') || uri.includes('/usb/')) return 'usb';
+      if (uri.startsWith('ipp://') || uri.startsWith('ipps://') || uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('socket://') || uri.startsWith('lpd://')) return 'network';
+      if (uri.startsWith('dnssd://') || uri.includes('._ipp.') || uri.includes('._pdl-datastream.')) return 'network';
+      if (uri.startsWith('bluetooth://') || uri.startsWith('bth://')) return 'bluetooth';
+      if (uri.startsWith('serial://') || uri.startsWith('/dev/tty')) return 'serial';
+      if (uri.startsWith('parallel://') || uri.startsWith('/dev/lp')) return 'parallel';
+    }
+
+    // 3. Heuristic: hex suffix in name = network discovery (mDNS/Bonjour/WSD)
+    //    e.g. "HP_DeskJet_2800_series_31A660" — the _XXXXXX is the MAC tail
+    if (/[_-][0-9a-f]{4,6}$/i.test(printer.name || '')) return 'network';
+
+    // 4. Heuristic from printer name
+    if (name.includes('wifi') || name.includes('wireless') || name.includes('airprint')) return 'network';
 
     return 'unknown';
   }
