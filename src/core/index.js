@@ -25,7 +25,7 @@ class HeadlessPrintClient {
     // Initialize ConfigManager (works without Electron via electron-store fallback)
     let configManager;
     try {
-      configManager = new ConfigManager();
+      configManager = await ConfigManager.create();
     } catch (_) {
       // electron-store may fail without Electron — use env vars
       configManager = null;

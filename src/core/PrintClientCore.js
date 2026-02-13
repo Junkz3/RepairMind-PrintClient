@@ -15,14 +15,17 @@ const PrinterDetector = require('./printerDetector');
 const SocketClient = require('./socketClient');
 const PrintExecutor = require('./printExecutor');
 const JobQueue = require('./jobQueue');
-const ConfigManager = require('./ConfigManager');
+
 const SpoolerMonitor = require('./spoolerMonitor');
 
 class PrintClientCore extends EventEmitter {
   constructor(config = {}) {
     super();
 
-    this.configManager = config.configManager || new ConfigManager();
+    if (!config.configManager) {
+      throw new Error('configManager is required — use await ConfigManager.create() before instantiating PrintClientCore');
+    }
+    this.configManager = config.configManager;
     const envConfig = this.configManager.getEnvironmentConfig();
 
     this.config = {

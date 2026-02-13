@@ -41,11 +41,11 @@ let autoLauncher = null;
 // APP LIFECYCLE
 // ═══════════════════════════════════════════════════════════════
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   log.info('App starting...', { version: app.getVersion() });
 
   // Initialize configuration manager
-  configManager = new ConfigManager();
+  configManager = await ConfigManager.create();
 
   // Initialize auto-launcher now that app is ready
   autoLauncher = new AutoLaunch({

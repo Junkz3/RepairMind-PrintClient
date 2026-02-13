@@ -336,46 +336,28 @@ class PrintExecutor {
       }, 15000);
     };
 
-    // Windows & Linux: use printDirect/lp for OS job ID tracking (spooler monitoring)
-    if (process.platform === 'win32') {
-      return this.printFileWithTracking(filePath, printerName).then((result) => { cleanupLater(); return result; });
-    } else if (process.platform === 'linux') {
+    // Windows/macOS: use Electron's webContents.print() — Chromium rasterizes the PDF
+    // via the OS printer driver. Works with all printers (label, thermal, inkjet, laser).
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      try {
+        const { BrowserWindow } = require('electron');
+        return this.printFileElectron(filePath, printerName, BrowserWindow)
+          .then(() => { cleanupLater(); return { osJobId: null }; });
+      } catch (_) {
+        // Electron not available (CLI mode) — fallback to lpr on macOS
+        if (process.platform === 'darwin') {
+          return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); return { osJobId: null }; });
+        }
+      }
+    }
+
+    // Linux: use lp for job ID tracking
+    if (process.platform === 'linux') {
       return this.printFileLinux(filePath, printerName).then((result) => { cleanupLater(); return result; });
     }
 
-    // macOS: try Electron first, fallback to lpr
-    try {
-      const { BrowserWindow } = require('electron');
-      return this.printFileElectron(filePath, printerName, BrowserWindow)
-        .then(() => { cleanupLater(); return { osJobId: null }; });
-    } catch (_) {
-      // Electron not available (CLI mode)
-    }
-
+    // Fallback
     return this.printFileUnix(filePath, printerName, 'lpr').then(() => { cleanupLater(); return { osJobId: null }; });
-  }
-
-  /**
-   * Print file on Windows using node-printer's printDirect (returns OS job ID)
-   * @param {string} filePath - Path to PDF file
-   * @param {string} printerName - Printer name
-   * @returns {Promise<{osJobId: number|null}>}
-   */
-  printFileWithTracking(filePath, printerName) {
-    return new Promise((resolve, reject) => {
-      try {
-        const data = fs.readFileSync(filePath);
-        printer.printDirect({
-          data,
-          printer: printerName,
-          type: 'PDF',
-          success: (jobId) => resolve({ osJobId: jobId ? parseInt(jobId, 10) : null }),
-          error: (err) => reject(new Error(`Print failed: ${err.message || err}`))
-        });
-      } catch (error) {
-        reject(new Error(`Print failed: ${error.message}`));
-      }
-    });
   }
 
   /**

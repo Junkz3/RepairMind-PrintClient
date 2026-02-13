@@ -4,16 +4,21 @@
  * Manages persistent configuration using electron-store
  */
 
-const Store = require('electron-store');
 const { ENVIRONMENTS, DEFAULT_CONFIG } = require('./config');
 const os = require('os');
 
 class ConfigManager {
-  constructor() {
-    this.store = new Store({
+  constructor(store) {
+    this.store = store;
+  }
+
+  static async create() {
+    const { default: Store } = await import('electron-store');
+    const store = new Store({
       name: 'repairmind-print-client',
       defaults: DEFAULT_CONFIG
     });
+    return new ConfigManager(store);
   }
 
   /**

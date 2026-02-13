@@ -71,7 +71,7 @@ class PrinterDetector {
 
     // Thermal / POS receipt printers
     const thermalKeywords = [
-      'thermal', 'receipt', 'pos ',
+      'thermal', 'receipt', 'pos ', 'pos-',
       // Epson POS
       'epson tm', 'tm-t', 'tm-m', 'tm-l', 'tm-u', 'tm-p', 'tm-h',
       // Star Micronics
@@ -181,7 +181,7 @@ class PrinterDetector {
       // HP
       'deskjet', 'officejet', 'envy', 'smart tank', 'hp ink',
       // Canon
-      'pixma', 'maxify', 'megatank', 'selphy',
+      'pixma', 'maxify', 'megatank', 'selphy', 'canon ts',
       // Epson inkjet
       'stylus', 'expression', 'workforce', 'ecotank', 'et-',
       // Brother inkjet
