@@ -599,14 +599,18 @@ class PrintExecutor {
     const labelWidthMm = job.options?.labelWidthMm || 62;
     const labelHeightMm = job.options?.labelHeightMm || 29;
 
+    // Landscape by default for label printers (DYMO, Brother QL, Zebra...)
+    // Can be overridden per job via options.labelLandscape = false
+    const landscape = job.options?.labelLandscape !== false;
+
     // Build HTML label
-    const html = this.buildLabelHTML(content, labelWidthMm, labelHeightMm);
+    const html = this.buildLabelHTML(content, labelWidthMm, labelHeightMm, landscape);
     const htmlPath = path.join(this.tempDir, `label_${job.id}.html`);
     fs.writeFileSync(htmlPath, html, 'utf8');
 
     try {
       const { BrowserWindow } = require('electron');
-      await this.printHTMLLabel(htmlPath, printerInfo.systemName, labelWidthMm, labelHeightMm, BrowserWindow);
+      await this.printHTMLLabel(htmlPath, printerInfo.systemName, labelWidthMm, labelHeightMm, landscape, BrowserWindow);
     } finally {
       // Cleanup
       setTimeout(() => {
@@ -620,7 +624,7 @@ class PrintExecutor {
   /**
    * Build HTML string for a label with exact dimensions via @page CSS
    */
-  buildLabelHTML(content, widthMm, heightMm) {
+  buildLabelHTML(content, widthMm, heightMm, landscape = true) {
     const lines = [];
 
     if (content.title) {
@@ -639,11 +643,10 @@ class PrintExecutor {
       lines.push(`<div style="font-size:6pt;text-align:center;margin-top:1mm">${this.escapeHTML(content.barcodeText)}</div>`);
     }
 
-    // DYMO and most label printers feed the short edge first.
-    // Use landscape so text reads naturally on the label.
+    const orientationCSS = landscape ? ' landscape' : '';
     return `<!DOCTYPE html>
 <html><head><style>
-  @page { size: ${widthMm}mm ${heightMm}mm landscape; margin: 0; }
+  @page { size: ${widthMm}mm ${heightMm}mm${orientationCSS}; margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     width: ${widthMm}mm; height: ${heightMm}mm;
@@ -665,7 +668,7 @@ class PrintExecutor {
   /**
    * Print an HTML file to a label printer via Electron BrowserWindow
    */
-  printHTMLLabel(htmlPath, printerName, widthMm, heightMm, BrowserWindow) {
+  printHTMLLabel(htmlPath, printerName, widthMm, heightMm, landscape, BrowserWindow) {
     return new Promise((resolve, reject) => {
       const win = new BrowserWindow({
         show: false,
@@ -680,7 +683,7 @@ class PrintExecutor {
             silent: true,
             deviceName: printerName,
             printBackground: true,
-            landscape: true,
+            landscape,
             margins: { marginType: 'none' },
             pageSize: {
               width: widthMm * 1000,   // microns
