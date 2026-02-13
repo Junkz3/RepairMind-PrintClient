@@ -327,7 +327,7 @@ class PrintExecutor {
    * @param {string} printerName - System printer name
    * @returns {Promise<{osJobId: number|null}>} OS spooler job ID if available
    */
-  sendFileToPrinter(filePath, printerName) {
+  sendFileToPrinter(filePath, printerName, options = {}) {
     const cleanupLater = () => {
       setTimeout(() => {
         if (fs.existsSync(filePath)) {
@@ -341,7 +341,7 @@ class PrintExecutor {
     if (process.platform === 'win32' || process.platform === 'darwin') {
       try {
         const { BrowserWindow } = require('electron');
-        return this.printFileElectron(filePath, printerName, BrowserWindow)
+        return this.printFileElectron(filePath, printerName, BrowserWindow, options)
           .then(() => { cleanupLater(); return { osJobId: null }; });
       } catch (_) {
         // Electron not available (CLI mode) — fallback to lpr on macOS
@@ -388,7 +388,7 @@ class PrintExecutor {
    * @param {string} printerName - Target printer name
    * @param {typeof import('electron').BrowserWindow} BrowserWindow
    */
-  printFileElectron(filePath, printerName, BrowserWindow) {
+  printFileElectron(filePath, printerName, BrowserWindow, options = {}) {
     return new Promise((resolve, reject) => {
       const win = new BrowserWindow({
         show: false,
@@ -405,11 +405,18 @@ class PrintExecutor {
       win.webContents.on('did-finish-load', () => {
         // Small delay to let the PDF renderer finish
         setTimeout(() => {
-          win.webContents.print({
+          const printOptions = {
             silent: true,
             deviceName: printerName,
             printBackground: true
-          }, (success, failureReason) => {
+          };
+
+          // Pass custom page size if provided (width/height in microns)
+          if (options.pageSize) {
+            printOptions.pageSize = options.pageSize;
+          }
+
+          win.webContents.print(printOptions, (success, failureReason) => {
             win.destroy();
             if (success) {
               resolve();
@@ -577,64 +584,127 @@ class PrintExecutor {
   }
 
   /**
-   * Generate and print a simple label from structured content
+   * Generate and print a label using Electron's hidden BrowserWindow.
+   * Renders HTML at exact label dimensions with @page CSS, then prints
+   * via webContents.print() with matching pageSize in microns.
+   * This avoids PDF rasterization issues with label printers (DYMO, etc.).
+   *
    * @param {Object} job - Print job
    * @param {Object} printerInfo - Printer info
    */
   async printGeneratedLabel(job, printerInfo) {
     const content = job.content;
-    const pdfPath = path.join(this.tempDir, `label_${job.id}.pdf`);
 
-    // Label dimensions (default 62mm x 29mm ≈ 176pt x 82pt)
-    const labelWidth = job.options?.labelWidth || 176;
-    const labelHeight = job.options?.labelHeight || 82;
+    // Label dimensions in mm (default 62x29mm for DYMO standard address)
+    const labelWidthMm = job.options?.labelWidthMm || 62;
+    const labelHeightMm = job.options?.labelHeightMm || 29;
 
+    // Build HTML label
+    const html = this.buildLabelHTML(content, labelWidthMm, labelHeightMm);
+    const htmlPath = path.join(this.tempDir, `label_${job.id}.html`);
+    fs.writeFileSync(htmlPath, html, 'utf8');
+
+    try {
+      const { BrowserWindow } = require('electron');
+      await this.printHTMLLabel(htmlPath, printerInfo.systemName, labelWidthMm, labelHeightMm, BrowserWindow);
+    } finally {
+      // Cleanup
+      setTimeout(() => {
+        try { if (fs.existsSync(htmlPath)) fs.unlinkSync(htmlPath); } catch (_) {}
+      }, 15000);
+    }
+
+    return { osJobId: null };
+  }
+
+  /**
+   * Build HTML string for a label with exact dimensions via @page CSS
+   */
+  buildLabelHTML(content, widthMm, heightMm) {
+    const lines = [];
+
+    if (content.title) {
+      lines.push(`<div style="font-size:10pt;font-weight:bold;text-align:center">${this.escapeHTML(content.title)}</div>`);
+    }
+    if (content.subtitle) {
+      lines.push(`<div style="font-size:7pt;text-align:center">${this.escapeHTML(content.subtitle)}</div>`);
+    }
+    if (content.sku) {
+      lines.push(`<div style="font-size:7pt;text-align:center">${this.escapeHTML(content.sku)}</div>`);
+    }
+    if (content.price) {
+      lines.push(`<div style="font-size:12pt;font-weight:bold;text-align:center;margin-top:2mm">${this.escapeHTML(String(content.price))}</div>`);
+    }
+    if (content.barcodeText) {
+      lines.push(`<div style="font-size:6pt;text-align:center;margin-top:1mm">${this.escapeHTML(content.barcodeText)}</div>`);
+    }
+
+    return `<!DOCTYPE html>
+<html><head><style>
+  @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: ${widthMm}mm; height: ${heightMm}mm;
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    padding: 1mm 2mm;
+  }
+</style></head><body>${lines.join('\n')}</body></html>`;
+  }
+
+  /**
+   * Escape HTML special characters
+   */
+  escapeHTML(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /**
+   * Print an HTML file to a label printer via Electron BrowserWindow
+   */
+  printHTMLLabel(htmlPath, printerName, widthMm, heightMm, BrowserWindow) {
     return new Promise((resolve, reject) => {
-      try {
-        const doc = new PDFDocument({
-          size: [labelWidth, labelHeight],
-          margins: { top: 5, bottom: 5, left: 5, right: 5 }
-        });
+      const win = new BrowserWindow({
+        show: false,
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
+      });
 
-        const stream = fs.createWriteStream(pdfPath);
-        doc.pipe(stream);
+      win.loadFile(htmlPath);
 
-        // Title line
-        if (content.title) {
-          doc.fontSize(10).font('Helvetica-Bold').text(content.title, { align: 'center' });
+      win.webContents.on('did-finish-load', () => {
+        setTimeout(() => {
+          win.webContents.print({
+            silent: true,
+            deviceName: printerName,
+            printBackground: true,
+            margins: { marginType: 'none' },
+            pageSize: {
+              width: widthMm * 1000,   // microns
+              height: heightMm * 1000  // microns
+            }
+          }, (success, failureReason) => {
+            win.destroy();
+            if (success) {
+              resolve();
+            } else {
+              reject(new Error(`Label print failed: ${failureReason}`));
+            }
+          });
+        }, 300);
+      });
+
+      win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        win.destroy();
+        reject(new Error(`Failed to load label HTML: ${errorDescription}`));
+      });
+
+      setTimeout(() => {
+        if (!win.isDestroyed()) {
+          win.destroy();
+          reject(new Error('Label print timeout (30s)'));
         }
-
-        // Subtitle / SKU
-        if (content.subtitle || content.sku) {
-          doc.fontSize(7).font('Helvetica').text(content.subtitle || content.sku, { align: 'center' });
-        }
-
-        // Price
-        if (content.price) {
-          doc.moveDown(0.3);
-          doc.fontSize(12).font('Helvetica-Bold').text(content.price, { align: 'center' });
-        }
-
-        // Barcode text (visual representation — actual barcode needs ZPL or image)
-        if (content.barcodeText) {
-          doc.moveDown(0.3);
-          doc.fontSize(6).font('Helvetica').text(content.barcodeText, { align: 'center' });
-        }
-
-        doc.end();
-
-        stream.on('finish', () => {
-          this.sendFileToPrinter(pdfPath, printerInfo.systemName)
-            .then(resolve)
-            .catch(reject);
-        });
-
-        stream.on('error', (error) => {
-          reject(new Error(`Label creation failed: ${error.message}`));
-        });
-      } catch (error) {
-        reject(error);
-      }
+      }, 30000);
     });
   }
 
