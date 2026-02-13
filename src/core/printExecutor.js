@@ -639,9 +639,11 @@ class PrintExecutor {
       lines.push(`<div style="font-size:6pt;text-align:center;margin-top:1mm">${this.escapeHTML(content.barcodeText)}</div>`);
     }
 
+    // DYMO and most label printers feed the short edge first.
+    // Use landscape so text reads naturally on the label.
     return `<!DOCTYPE html>
 <html><head><style>
-  @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+  @page { size: ${widthMm}mm ${heightMm}mm landscape; margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     width: ${widthMm}mm; height: ${heightMm}mm;
@@ -678,6 +680,7 @@ class PrintExecutor {
             silent: true,
             deviceName: printerName,
             printBackground: true,
+            landscape: true,
             margins: { marginType: 'none' },
             pageSize: {
               width: widthMm * 1000,   // microns
