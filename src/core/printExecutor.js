@@ -596,26 +596,26 @@ class PrintExecutor {
     const content = job.content;
 
     // Physical label dimensions in mm (default 62x29mm for DYMO standard address)
-    const physicalWidthMm = job.options?.labelWidthMm || 62;
-    const physicalHeightMm = job.options?.labelHeightMm || 29;
+    // Template-resolved content may include widthMm/heightMm from the template
+    const widthMm = content.widthMm || job.options?.labelWidthMm || 62;
+    const heightMm = content.heightMm || job.options?.labelHeightMm || 29;
 
-    // Label printers (DYMO, Brother QL, Zebra) feed the short edge first.
-    // We swap width↔height so the page matches the feed direction:
-    // page width = physical short edge, page height = physical long edge.
-    // Text flows top→bottom on the page = left→right on the physical label.
-    // Set options.labelRotate = false to disable swapping.
-    const rotate = job.options?.labelRotate !== false;
-    const pageWidthMm = rotate ? physicalHeightMm : physicalWidthMm;
-    const pageHeightMm = rotate ? physicalWidthMm : physicalHeightMm;
+    // DYMO/Brother QL feed the short edge first (portrait).
+    // We keep the original dimensions (62×29) for HTML layout and use
+    // Electron's `landscape: true` print option to handle orientation.
+    // This lets Chromium + the printer driver rotate content correctly.
+    const landscape = job.options?.labelRotate !== false && widthMm > heightMm;
 
-    // Build HTML label
-    const html = this.buildLabelHTML(content, pageWidthMm, pageHeightMm);
+    // Build HTML label — templated (positioned elements) or legacy (title/subtitle/sku)
+    const html = content.elements
+      ? this.buildTemplatedLabelHTML(content.elements, widthMm, heightMm)
+      : this.buildLabelHTML(content, widthMm, heightMm);
     const htmlPath = path.join(this.tempDir, `label_${job.id}.html`);
     fs.writeFileSync(htmlPath, html, 'utf8');
 
     try {
       const { BrowserWindow } = require('electron');
-      await this.printHTMLLabel(htmlPath, printerInfo.systemName, pageWidthMm, pageHeightMm, BrowserWindow);
+      await this.printHTMLLabel(htmlPath, printerInfo.systemName, widthMm, heightMm, BrowserWindow, landscape);
     } finally {
       // Cleanup
       setTimeout(() => {
@@ -627,7 +627,9 @@ class PrintExecutor {
   }
 
   /**
-   * Build HTML string for a label with exact dimensions via @page CSS
+   * Build HTML string for a label with exact dimensions via @page CSS.
+   * Content is laid out at the label's natural dimensions (e.g. 62×29mm).
+   * Orientation is handled by Electron's landscape print option, not CSS.
    */
   buildLabelHTML(content, widthMm, heightMm) {
     const lines = [];
@@ -663,6 +665,41 @@ class PrintExecutor {
   }
 
   /**
+   * Build HTML for a templated label with positioned elements (from label template editor).
+   * Elements are positioned at the label's natural dimensions (widthMm × heightMm).
+   * Orientation is handled by Electron's landscape print option, not CSS.
+   *
+   * @param {Array} elements - Positioned elements from label template
+   * @param {number} widthMm - Label width (e.g. 62mm)
+   * @param {number} heightMm - Label height (e.g. 29mm)
+   */
+  buildTemplatedLabelHTML(elements, widthMm, heightMm) {
+    const elems = elements.map(el => {
+      if (el.type === 'line') {
+        return `<div style="position:absolute;left:${el.x}mm;top:${el.y}mm;width:${el.width}mm;height:0;border-top:0.3mm solid black;"></div>`;
+      }
+
+      const fs = el.fontSize || 8;
+      const fw = el.fontWeight || 'normal';
+      const ta = el.textAlign || 'left';
+      const content = this.escapeHTML(el.content || '');
+
+      return `<div style="position:absolute;left:${el.x}mm;top:${el.y}mm;width:${el.width}mm;height:${el.height}mm;font-size:${fs}pt;font-weight:${fw};text-align:${ta};line-height:${el.height}mm;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${content}</div>`;
+    });
+
+    return `<!DOCTYPE html>
+<html><head><style>
+  @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: ${widthMm}mm; height: ${heightMm}mm;
+    font-family: Arial, Helvetica, sans-serif;
+    position: relative;
+  }
+</style></head><body>${elems.join('\n')}</body></html>`;
+  }
+
+  /**
    * Escape HTML special characters
    */
   escapeHTML(str) {
@@ -670,9 +707,15 @@ class PrintExecutor {
   }
 
   /**
-   * Print an HTML file to a label printer via Electron BrowserWindow
+   * Print an HTML file to a label printer via Electron BrowserWindow.
+   * @param {string} htmlPath - Path to HTML file
+   * @param {string} printerName - System printer name
+   * @param {number} widthMm - Label width in mm (physical label width, e.g. 62)
+   * @param {number} heightMm - Label height in mm (physical label height, e.g. 29)
+   * @param {typeof import('electron').BrowserWindow} BrowserWindow
+   * @param {boolean} landscape - Print in landscape orientation (for labels wider than tall)
    */
-  printHTMLLabel(htmlPath, printerName, widthMm, heightMm, BrowserWindow) {
+  printHTMLLabel(htmlPath, printerName, widthMm, heightMm, BrowserWindow, landscape = false) {
     return new Promise((resolve, reject) => {
       const win = new BrowserWindow({
         show: false,
@@ -683,16 +726,23 @@ class PrintExecutor {
 
       win.webContents.on('did-finish-load', () => {
         setTimeout(() => {
-          win.webContents.print({
+          // For landscape labels (width > height), Chromium needs:
+          // - landscape: true to tell the print driver to rotate
+          // - pageSize with width/height as the PHYSICAL label dimensions
+          //   Chromium swaps them internally when landscape=true
+          const printOpts = {
             silent: true,
             deviceName: printerName,
             printBackground: true,
+            landscape: landscape,
             margins: { marginType: 'none' },
             pageSize: {
-              width: widthMm * 1000,   // microns
-              height: heightMm * 1000  // microns
+              width: Math.round(widthMm * 1000),   // microns (integer)
+              height: Math.round(heightMm * 1000)   // microns (integer)
             }
-          }, (success, failureReason) => {
+          };
+
+          win.webContents.print(printOpts, (success, failureReason) => {
             win.destroy();
             if (success) {
               resolve();
